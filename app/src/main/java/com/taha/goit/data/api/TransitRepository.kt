@@ -390,7 +390,7 @@ class TransitRepository {
                 } else {
                     continue
                 }
-                val busMinutes = max(stopCount * 2, 5)
+                val busMinutes = busLegMinutes(tripStops)
                 val walkToMin = walkMinutes(walkToMeters)
                 val walkFromMin = walkMinutes(walkFromMeters)
                 val totalMin = INITIAL_WAIT_MIN + busMinutes + walkToMin + walkFromMin
@@ -661,7 +661,9 @@ class TransitRepository {
         val firstCount = firstStops.size - 1
         val secondCount = secondStops.size - 1
         val total = firstCount + secondCount
-        val busMinutes = max(total * 2, 8)
+        val firstBusMin = busLegMinutes(firstStops)
+        val secondBusMin = busLegMinutes(secondStops)
+        val busMinutes = firstBusMin + secondBusMin
         val walkToMin = walkMinutes(walkToM)
         val walkFromMin = walkMinutes(walkFromM)
         val transferWalkMin = walkMinutes(transferWalkM)
@@ -682,7 +684,7 @@ class TransitRepository {
                     boardStop = firstStops.firstOrNull(),
                     alightStop = firstStops.lastOrNull(),
                     stops = firstStops,
-                    minutes = firstCount * 2
+                    minutes = firstBusMin
                 )
             )
             if (transferWalkM >= MIN_WALK_LEG_M) {
@@ -698,7 +700,7 @@ class TransitRepository {
                     boardStop = secondStops.firstOrNull(),
                     alightStop = secondStops.lastOrNull(),
                     stops = secondStops,
-                    minutes = secondCount * 2
+                    minutes = secondBusMin
                 )
             )
             if (walkFromM >= MIN_WALK_LEG_M) {
@@ -749,6 +751,24 @@ class TransitRepository {
             isWalkOnly = true,
             walkOnlyMeters = meters
         )
+    }
+
+    /** Otobüs bacağı süresi: durak koordinatlarından toplam mesafe + durak duruşları. */
+    private fun busLegMinutes(stops: List<RouteStop>): Int {
+        if (stops.size < 2) return 3
+        var meters = 0.0
+        for (i in 0 until stops.size - 1) {
+            val a = stops[i]; val b = stops[i + 1]
+            val la1 = a.latitude?.toDoubleOrNull() ?: continue
+            val lo1 = a.longitude?.toDoubleOrNull() ?: continue
+            val la2 = b.latitude?.toDoubleOrNull() ?: continue
+            val lo2 = b.longitude?.toDoubleOrNull() ?: continue
+            meters += calculateDistanceMeters(la1, lo1, la2, lo2)
+        }
+        // 22 km/h efektif hız + durak başına ~20 sn duruş
+        val drive = meters / 1000.0 / 22.0 * 60.0
+        val dwell = (stops.size - 1) * 0.33
+        return max(3, Math.round(drive + dwell).toInt())
     }
 
     /** Yürüme süresi: 12 dk/km (Moovit benzeri). */

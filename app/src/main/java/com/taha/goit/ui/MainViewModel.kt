@@ -14,10 +14,12 @@ import com.taha.goit.util.MapsLinkParser
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
@@ -85,6 +87,7 @@ data class MainUiState(
     val tripPlans: List<RoutePlan> = emptyList(),
     val isTripPlanning: Boolean = false,
     val selectedPlan: RoutePlan? = null,
+    val planEtas: Map<String, String> = emptyMap(),
     val errorMessage: String? = null,
     // Yakındaki duraklar
     val nearbyStops: List<NearbyStopUi> = emptyList(),
@@ -120,6 +123,7 @@ class MainViewModel : ViewModel() {
     private var searchJob: Job? = null
     private var nearbyJob: Job? = null
     private var nearestEtaLoopJob: Job? = null
+    private var planEtaJob: Job? = null
 
     // ---------- Başlatma ----------
 
@@ -514,6 +518,11 @@ class MainViewModel : ViewModel() {
                 isTripPlanning = false,
                 errorMessage = if (finalPlans.isEmpty()) "Bu iki nokta arasında uygun rota bulunamadı." else null
             )
+            if (finalPlans.isNotEmpty()) {
+                startPlanEtaLoop()
+            } else {
+                planEtaJob?.cancel()
+            }
         }
     }
 
@@ -527,10 +536,12 @@ class MainViewModel : ViewModel() {
     }
 
     fun clearTrip() {
+        planEtaJob?.cancel()
         _uiState.value = _uiState.value.copy(
             tripPlans = emptyList(),
             tripDestination = null,
             selectedPlan = null,
+            planEtas = emptyMap(),
             isTripPlanning = false,
             errorMessage = null
         )
@@ -674,6 +685,58 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    private fun startPlanEtaLoop() {
+        planEtaJob?.cancel()
+        planEtaJob = viewModelScope.launch {
+            while (isActive) {
+                val plans = _uiState.value.tripPlans
+                if (plans.isEmpty()) break
+                val pairs = mutableListOf<Pair<Int, String>>()
+                for (plan in plans) {
+                    if (plan.isWalkOnly) continue
+                    val firstBusLeg = plan.legs.firstOrNull { it.kind == "bus" } ?: continue
+                    val stopId = firstBusLeg.boardStop?.stopId ?: continue
+                    val code = firstBusLeg.routeCode ?: continue
+                    pairs.add(stopId to code)
+                }
+                val uniquePairs = pairs.distinct()
+                if (uniquePairs.isEmpty()) {
+                    delay(30_000L)
+                    continue
+                }
+                val stopIds = uniquePairs.map { it.first }.distinct()
+
+                val etasByStop = mutableMapOf<Int, List<StopRemainingTime>>()
+                val semaphore = Semaphore(3)
+                coroutineScope {
+                    stopIds.forEach { sId ->
+                        launch {
+                            semaphore.withPermit {
+                                val list = repository.getStationRemainingTime(sId)
+                                synchronized(etasByStop) {
+                                    etasByStop[sId] = list
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val newMap = mutableMapOf<String, String>()
+                for ((sId, code) in uniquePairs) {
+                    val list = etasByStop[sId] ?: emptyList()
+                    val match = list.firstOrNull { it.routeCode.equals(code, ignoreCase = true) }
+                    val raw = match?.realTime ?: match?.passTime
+                    val etaStr = if (!raw.isNullOrBlank()) {
+                        formatEtaTime(raw)
+                    } else null
+                    newMap["$sId:$code"] = if (etaStr != null && etaStr != "-") "~$etaStr" else "–"
+                }
+                _uiState.value = _uiState.value.copy(planEtas = newMap)
+                delay(30_000L)
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         trackingJob?.cancel()
@@ -681,5 +744,6 @@ class MainViewModel : ViewModel() {
         searchJob?.cancel()
         nearbyJob?.cancel()
         nearestEtaLoopJob?.cancel()
+        planEtaJob?.cancel()
     }
 }

@@ -138,7 +138,7 @@ class JourneyService : Service(), LocationListener {
                 updateNotification("İniş zamanı! $destinationName durağına hoş geldiniz.", true)
             }
             else -> {
-                val etaMin = (distanceMeters / 1000.0 / 20.0 * 60.0).roundToInt() // ~20 km/s ortalama
+                val etaMin = (distanceMeters / 1000.0 / 22.0 * 60.0).roundToInt() // ~22 km/s ortalama
                 updateNotification(
                     "Hedefe ${distanceMeters.roundToInt()} m kaldı (~$etaMin dk) • $destinationName",
                     false

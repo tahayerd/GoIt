@@ -567,7 +567,16 @@ private fun TripBottomPanel(
                     } else {
                         LazyColumn(modifier = Modifier.heightIn(max = 230.dp)) {
                             items(uiState.tripPlans) { plan ->
-                                PlanRow(plan = plan, onClick = { viewModel.selectRouteFromPlan(plan) })
+                                val firstBus = plan.legs.firstOrNull { it.kind == "bus" }
+                                val etaKey = if (firstBus != null && firstBus.boardStop?.stopId != null && firstBus.routeCode != null) {
+                                    "${firstBus.boardStop!!.stopId}:${firstBus.routeCode}"
+                                } else null
+                                val etaText = etaKey?.let { uiState.planEtas[it] }
+                                PlanRow(
+                                    plan = plan,
+                                    etaText = etaText,
+                                    onClick = { viewModel.selectRouteFromPlan(plan) }
+                                )
                                 HorizontalDivider(thickness = 0.5.dp)
                             }
                         }
@@ -601,7 +610,18 @@ private fun TripBottomPanel(
 }
 
 @Composable
-private fun PlanRow(plan: RoutePlan, onClick: () -> Unit) {
+private fun PlanRow(
+    plan: RoutePlan,
+    etaText: String? = null,
+    onClick: () -> Unit
+) {
+    val arrivalTimeText = remember(plan.estimatedDurationMinutes) {
+        runCatching {
+            val now = java.time.LocalTime.now()
+            val arrival = now.plusMinutes(plan.estimatedDurationMinutes.toLong())
+            arrival.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+        }.getOrNull()
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -619,15 +639,32 @@ private fun PlanRow(plan: RoutePlan, onClick: () -> Unit) {
                 Icon(Icons.Default.DirectionsWalk, "Yürüyüş", tint = Color.White, modifier = Modifier.size(20.dp))
             }
         } else {
-            Box(
-                modifier = Modifier
-                    .background(
-                        if (plan.isTransfer) Color(0xFFE37400) else Color(0xFF1A73E8),
-                        RoundedCornerShape(8.dp)
-                    )
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Text(plan.routeCode, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (plan.isTransfer) Color(0xFFE37400) else Color(0xFF1A73E8),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(plan.routeCode, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                }
+                if (!etaText.isNullOrBlank() && etaText != "–") {
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFF0F9D58).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            "🚍 $etaText sonra",
+                            color = Color(0xFF0F9D58),
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
             }
         }
         Spacer(Modifier.width(12.dp))
@@ -636,7 +673,8 @@ private fun PlanRow(plan: RoutePlan, onClick: () -> Unit) {
             if (plan.isWalkOnly) {
                 Text("Sadece yürü", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "${formatDistance(plan.walkOnlyMeters)} • ~${plan.estimatedDurationMinutes} dk",
+                    "${formatDistance(plan.walkOnlyMeters)} • ~${plan.estimatedDurationMinutes} dk" +
+                        (if (arrivalTimeText != null) " • Varış ~$arrivalTimeText" else ""),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -645,6 +683,7 @@ private fun PlanRow(plan: RoutePlan, onClick: () -> Unit) {
                 Spacer(Modifier.height(2.dp))
                 Text(
                     "Toplam ~${plan.estimatedDurationMinutes} dk" +
+                        (if (arrivalTimeText != null) " • Varış ~$arrivalTimeText" else "") +
                         (if (plan.totalStops > 0) " • ${plan.totalStops} durak" else "") +
                         (if (plan.isTransfer) " • 1 aktarma" else ""),
                     style = MaterialTheme.typography.labelSmall,
