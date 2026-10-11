@@ -613,7 +613,7 @@ class TransitRepository {
                                 destStop = walkFromCandidate.stop,
                                 transferStop = hopStop,
                                 walkToM = walkToM,
-                                walkFromM = walkFromCandidate.second,
+                                walkFromM = walkFromCandidate.walkMeters,
                                 transferWalkM = transferWalk,
                                 originLat = originLat,
                                 originLng = originLng,
