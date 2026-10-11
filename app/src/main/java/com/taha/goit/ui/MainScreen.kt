@@ -789,6 +789,68 @@ private fun TripBottomPanel(
                             Icon(Icons.Default.Close, "Kapat")
                         }
                     }
+                    val sortedPlans = remember(uiState.tripPlans, uiState.planSort) {
+                        when (uiState.planSort) {
+                            "hizli" -> {
+                                uiState.tripPlans.sortedWith(
+                                    compareBy<RoutePlan> { if (it.isWalkOnly && it.estimatedDurationMinutes <= 0) 0 else 1 }
+                                        .thenBy { it.estimatedDurationMinutes }
+                                )
+                            }
+                            "azyurume" -> {
+                                uiState.tripPlans.sortedWith(
+                                    compareBy<RoutePlan> { if (it.isWalkOnly) 0 else 1 }
+                                        .thenBy { it.walkToMeters + it.walkFromMeters + it.transferWalkMeters }
+                                )
+                            }
+                            "azaktarma" -> {
+                                uiState.tripPlans.sortedWith(
+                                    compareBy<RoutePlan> { it.isTransfer }
+                                        .thenBy { it.estimatedDurationMinutes }
+                                )
+                            }
+                            else -> uiState.tripPlans
+                        }
+                    }
+
+                    if (uiState.tripPlans.isNotEmpty()) {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            item {
+                                FilterChip(
+                                    selected = uiState.planSort == "onerilen",
+                                    onClick = { viewModel.setPlanSort("onerilen") },
+                                    label = { Text("Önerilen", style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+                            item {
+                                FilterChip(
+                                    selected = uiState.planSort == "hizli",
+                                    onClick = { viewModel.setPlanSort("hizli") },
+                                    label = { Text("En Hızlı", style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+                            item {
+                                FilterChip(
+                                    selected = uiState.planSort == "azyurume",
+                                    onClick = { viewModel.setPlanSort("azyurume") },
+                                    label = { Text("Az Yürüme", style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+                            item {
+                                FilterChip(
+                                    selected = uiState.planSort == "azaktarma",
+                                    onClick = { viewModel.setPlanSort("azaktarma") },
+                                    label = { Text("Az Aktarma", style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+                        }
+                    }
+
                     if (uiState.tripPlans.isEmpty() && !uiState.isTripPlanning) {
                         Text(
                             uiState.errorMessage ?: "Rota bulunamadı.",
@@ -797,7 +859,7 @@ private fun TripBottomPanel(
                         )
                     } else {
                         LazyColumn(modifier = Modifier.heightIn(max = 230.dp)) {
-                            items(uiState.tripPlans) { plan ->
+                            items(sortedPlans) { plan ->
                                 val firstBus = plan.legs.firstOrNull { it.kind == "bus" }
                                 val etaKey = if (firstBus != null && firstBus.boardStop?.stopId != null && firstBus.routeCode != null) {
                                     "${firstBus.boardStop!!.stopId}:${firstBus.routeCode}"

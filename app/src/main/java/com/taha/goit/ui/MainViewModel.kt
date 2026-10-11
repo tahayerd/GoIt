@@ -114,7 +114,9 @@ data class MainUiState(
     val navigateToTab: Int? = null,
     // Kayıtlı Yerler ve Yolculuk Geçmişi
     val savedPlaces: List<SavedPlace> = emptyList(),
-    val journeyHistory: List<JourneyHistoryEntry> = emptyList()
+    val journeyHistory: List<JourneyHistoryEntry> = emptyList(),
+    // Rota sıralama seçeneği ("onerilen" | "hizli" | "azyurume" | "azaktarma")
+    val planSort: String = "onerilen"
 )
 
 class MainViewModel : ViewModel() {
@@ -218,6 +220,10 @@ class MainViewModel : ViewModel() {
             errorMessage = null
         )
         planTrip()
+    }
+
+    fun setPlanSort(sort: String) {
+        _uiState.value = _uiState.value.copy(planSort = sort)
     }
 
     /** Gömülü veritabanları yüklendikten sonra çağrılır. */
