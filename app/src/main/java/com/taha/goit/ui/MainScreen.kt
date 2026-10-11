@@ -1,6 +1,8 @@
 package com.taha.goit.ui
 
 import android.content.Context
+import android.widget.Toast
+import com.taha.goit.service.JourneyService
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -342,6 +344,15 @@ fun MainScreen(
             }
         )
     }
+
+    JourneyScreen(
+        onStopJourney = {
+            JourneyService.stop(context)
+        },
+        onAdvanceJourney = {
+            JourneyService.advance(context)
+        }
+    )
 }
 
 // =========================================================
@@ -808,6 +819,7 @@ private fun TripBottomPanel(
     onStartJourney: (Double, Double, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     Column(modifier = modifier.fillMaxWidth()) {
         if (uiState.tripPlans.isNotEmpty() || uiState.isTripPlanning || uiState.errorMessage != null) {
             Card(
@@ -826,6 +838,33 @@ private fun TripBottomPanel(
                         }
                         IconButton(onClick = { viewModel.clearTrip() }) {
                             Icon(Icons.Default.Close, "Kapat")
+                        }
+                    }
+
+                    if (uiState.selectedPlan != null) {
+                        Button(
+                            onClick = {
+                                val json = viewModel.buildJourneyPayloadJson()
+                                if (json != null) {
+                                    if (LocationHelper.hasPermission(context)) {
+                                        JourneyService.startJourney(context, json)
+                                    } else {
+                                        Toast.makeText(context, "Canlı rehberlik için konum izni gerekli", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF16A34A),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Yolculuğu Başlat ▶", fontWeight = FontWeight.Bold)
                         }
                     }
                     val sortedPlans = remember(uiState.tripPlans, uiState.planSort) {
