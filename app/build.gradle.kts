@@ -12,8 +12,8 @@ android {
         applicationId = "com.taha.goit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -47,6 +47,11 @@ android {
         kotlinCompilerExtensionVersion = "1.5.11"
     }
     packaging {
+        // 16 KB page-size devices require uncompressed native libraries so the
+        // loader can mmap them straight from the APK (16 KB zip-aligned).
+        jniLibs {
+            useLegacyPackaging = false
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
