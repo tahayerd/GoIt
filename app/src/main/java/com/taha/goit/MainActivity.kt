@@ -39,6 +39,10 @@ class MainActivity : ComponentActivity() {
         // Dışarıdan gelen Google Maps Intent'ini işle
         handleIncomingIntent(intent)
 
+        val app = application as GoItApp
+        viewModel.setPlacesManager(app.savedPlacesManager)
+        viewModel.setJourneyHistoryManager(app.journeyHistoryManager)
+
         setContent {
             GoItTheme {
                 MainScreen(

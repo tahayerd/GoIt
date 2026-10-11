@@ -1,10 +1,13 @@
 package com.taha.goit.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,8 +31,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.taha.goit.data.local.FavoriteItem
 import com.taha.goit.data.local.FavoritesManager
+import com.taha.goit.data.local.JourneyHistoryEntry
 import com.taha.goit.data.local.RouteCatalog
 import com.taha.goit.data.local.RouteHistoryManager
+import com.taha.goit.data.local.SavedPlace
 import com.taha.goit.data.local.StationDatabase
 import com.taha.goit.data.model.RoutePlan
 import com.taha.goit.data.model.RouteStop
@@ -343,6 +348,11 @@ private fun TripSearchCard(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
+    var placeToSave by remember { mutableStateOf<PlaceResult?>(null) }
+    var saveKind by remember { mutableStateOf("home") }
+    var customName by remember { mutableStateOf("") }
+    var placeToManage by remember { mutableStateOf<SavedPlace?>(null) }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -399,7 +409,15 @@ private fun TripSearchCard(
                 if (uiState.tripSearchResults.isNotEmpty()) {
                     LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
                         items(uiState.tripSearchResults) { place ->
-                            PlaceRow(place, onSelect = { viewModel.selectTripPlace(place) })
+                            PlaceRow(
+                                place = place,
+                                onSelect = { viewModel.selectTripPlace(place) },
+                                onSavePlace = {
+                                    placeToSave = it
+                                    saveKind = "home"
+                                    customName = it.name
+                                }
+                            )
                             HorizontalDivider(thickness = 0.5.dp)
                         }
                     }
@@ -466,7 +484,197 @@ private fun TripSearchCard(
                         Text("Rota Bul", fontWeight = FontWeight.Bold)
                     }
                 }
+
+                // Kayıtlı Yerler (F2)
+                if (uiState.savedPlaces.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Kayıtlı Yerler",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(uiState.savedPlaces.take(6)) { place ->
+                            SavedPlaceChip(
+                                place = place,
+                                onClick = { viewModel.selectSavedPlaceAsDestination(place) },
+                                onLongClick = { placeToManage = place }
+                            )
+                        }
+                    }
+                }
+
+                // Son Yolculuklar (F3)
+                if (uiState.journeyHistory.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Son Yolculuklar",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        uiState.journeyHistory.take(3).forEach { entry ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.repeatJourney(entry) }
+                                    .padding(vertical = 4.dp, horizontal = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.History,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "${entry.originName} → ${entry.destName}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    // Dialog: Yer Kaydet (F2)
+    if (placeToSave != null) {
+        val place = placeToSave!!
+        AlertDialog(
+            onDismissRequest = { placeToSave = null },
+            title = { Text("Yeri Kaydet", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(place.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Kategori:", style = MaterialTheme.typography.labelMedium)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = saveKind == "home",
+                            onClick = { saveKind = "home" },
+                            label = { Text("🏠 Ev") }
+                        )
+                        FilterChip(
+                            selected = saveKind == "work",
+                            onClick = { saveKind = "work" },
+                            label = { Text("💼 İş") }
+                        )
+                        FilterChip(
+                            selected = saveKind == "custom",
+                            onClick = { saveKind = "custom" },
+                            label = { Text("★ Özel") }
+                        )
+                    }
+                    if (saveKind == "custom") {
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = customName,
+                            onValueChange = { customName = it },
+                            label = { Text("Yer Adı") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val finalName = when (saveKind) {
+                        "home" -> "Ev"
+                        "work" -> "İş"
+                        else -> customName.ifBlank { place.name }
+                    }
+                    val id = when (saveKind) {
+                        "home" -> "home"
+                        "work" -> "work"
+                        else -> java.util.UUID.randomUUID().toString()
+                    }
+                    val lat = place.lat ?: return@TextButton
+                    val lng = place.lng ?: return@TextButton
+                    viewModel.savePlace(SavedPlace(id = id, name = finalName, lat = lat, lng = lng, kind = saveKind))
+                    placeToSave = null
+                }) {
+                    Text("Kaydet", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { placeToSave = null }) {
+                    Text("İptal")
+                }
+            }
+        )
+    }
+
+    // Dialog: Kayıtlı Yeri Yönet (F2 - Uzun Basma)
+    if (placeToManage != null) {
+        val place = placeToManage!!
+        AlertDialog(
+            onDismissRequest = { placeToManage = null },
+            title = { Text(place.name, fontWeight = FontWeight.Bold) },
+            text = { Text("Bu kayıtlı yer için bir işlem seçin:") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.selectSavedPlaceAsOrigin(place)
+                    placeToManage = null
+                }) {
+                    Text("Kalkış Yap")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        viewModel.removeSavedPlace(place.id)
+                        placeToManage = null
+                    }) {
+                        Text("Kaldır", color = MaterialTheme.colorScheme.error)
+                    }
+                    TextButton(onClick = { placeToManage = null }) {
+                        Text("İptal")
+                    }
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SavedPlaceChip(
+    place: SavedPlace,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val (icon, label) = when (place.kind) {
+        "home" -> Icons.Default.Home to (if (place.name.isNotBlank()) place.name else "Ev")
+        "work" -> Icons.Default.Work to (if (place.name.isNotBlank()) place.name else "İş")
+        else -> Icons.Default.Star to place.name
+    }
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+        modifier = Modifier.combinedClickable(
+            onClick = onClick,
+            onLongClick = onLongClick
+        )
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Icon(icon, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(6.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -505,12 +713,16 @@ private fun TripPointRow(
 }
 
 @Composable
-private fun PlaceRow(place: PlaceResult, onSelect: () -> Unit) {
+private fun PlaceRow(
+    place: PlaceResult,
+    onSelect: () -> Unit,
+    onSavePlace: ((PlaceResult) -> Unit)? = null
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onSelect)
-            .padding(horizontal = 6.dp, vertical = 10.dp),
+            .padding(horizontal = 6.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val (icon, tint) = when (place.kind) {
@@ -522,9 +734,28 @@ private fun PlaceRow(place: PlaceResult, onSelect: () -> Unit) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(place.name, fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                place.name,
+                fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             place.subtitle?.let {
                 Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (onSavePlace != null && place.lat != null && place.lng != null) {
+            IconButton(
+                onClick = { onSavePlace(place) },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    Icons.Default.StarBorder,
+                    contentDescription = "Kaydet",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }

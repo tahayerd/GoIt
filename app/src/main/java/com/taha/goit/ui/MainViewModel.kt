@@ -8,7 +8,10 @@ import com.taha.goit.data.local.FavoriteItem
 import com.taha.goit.data.local.FavoritesManager
 import com.taha.goit.data.local.RouteCatalog
 import com.taha.goit.data.local.RouteHistoryManager
-import com.taha.goit.data.local.StationDatabase
+import com.taha.goit.data.local.JourneyHistoryEntry
+import com.taha.goit.data.local.JourneyHistoryManager
+import com.taha.goit.data.local.SavedPlace
+import com.taha.goit.data.local.SavedPlacesManager
 import com.taha.goit.data.model.*
 import com.taha.goit.util.MapsLinkParser
 import kotlinx.coroutines.Job
@@ -107,7 +110,10 @@ data class MainUiState(
     val nearestStopName: String? = null,
     val showAllRoutes: Boolean = false,
     // Sekme yönlendirme olayı (örn. "Buradan Git" → Yol Tarifi sekmesi)
-    val navigateToTab: Int? = null
+    val navigateToTab: Int? = null,
+    // Kayıtlı Yerler ve Yolculuk Geçmişi
+    val savedPlaces: List<SavedPlace> = emptyList(),
+    val journeyHistory: List<JourneyHistoryEntry> = emptyList()
 )
 
 class MainViewModel : ViewModel() {
@@ -116,6 +122,8 @@ class MainViewModel : ViewModel() {
 
     private var favoritesManager: FavoritesManager? = null
     private var historyManager: RouteHistoryManager? = null
+    private var savedPlacesManager: SavedPlacesManager? = null
+    private var journeyHistoryManager: JourneyHistoryManager? = null
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -136,6 +144,79 @@ class MainViewModel : ViewModel() {
             favorites = favorites.getFavorites(),
             recentRoutes = history.getRecent()
         )
+    }
+
+    fun setPlacesManager(manager: SavedPlacesManager) {
+        savedPlacesManager = manager
+        _uiState.value = _uiState.value.copy(savedPlaces = manager.getAll())
+    }
+
+    fun setJourneyHistoryManager(manager: JourneyHistoryManager) {
+        journeyHistoryManager = manager
+        _uiState.value = _uiState.value.copy(journeyHistory = manager.getHistory())
+    }
+
+    fun refreshSavedPlaces() {
+        val manager = savedPlacesManager ?: return
+        _uiState.value = _uiState.value.copy(savedPlaces = manager.getAll())
+    }
+
+    fun savePlace(place: SavedPlace) {
+        savedPlacesManager?.save(place)
+        refreshSavedPlaces()
+    }
+
+    fun removeSavedPlace(id: String) {
+        savedPlacesManager?.remove(id)
+        refreshSavedPlaces()
+    }
+
+    fun selectSavedPlaceAsDestination(place: SavedPlace) {
+        val uLat = _uiState.value.userLat
+        val uLng = _uiState.value.userLng
+        val origin = _uiState.value.tripOrigin ?: if (uLat != null && uLng != null) {
+            TripPoint("Konumum", uLat, uLng, isUserLocation = true)
+        } else null
+
+        _uiState.value = _uiState.value.copy(
+            tripOrigin = origin,
+            tripDestination = TripPoint(place.name, place.lat, place.lng),
+            tripSearchField = null,
+            tripSearchQuery = "",
+            tripSearchResults = emptyList(),
+            tripPlans = emptyList(),
+            selectedPlan = null,
+            errorMessage = null
+        )
+        if (origin != null) {
+            planTrip()
+        }
+    }
+
+    fun selectSavedPlaceAsOrigin(place: SavedPlace) {
+        _uiState.value = _uiState.value.copy(
+            tripOrigin = TripPoint(place.name, place.lat, place.lng),
+            tripSearchField = null,
+            tripSearchQuery = "",
+            tripSearchResults = emptyList(),
+            tripPlans = emptyList(),
+            selectedPlan = null,
+            errorMessage = null
+        )
+    }
+
+    fun repeatJourney(entry: JourneyHistoryEntry) {
+        _uiState.value = _uiState.value.copy(
+            tripOrigin = TripPoint(entry.originName, entry.originLat, entry.originLng),
+            tripDestination = TripPoint(entry.destName, entry.destLat, entry.destLng),
+            tripSearchField = null,
+            tripSearchQuery = "",
+            tripSearchResults = emptyList(),
+            tripPlans = emptyList(),
+            selectedPlan = null,
+            errorMessage = null
+        )
+        planTrip()
     }
 
     /** Gömülü veritabanları yüklendikten sonra çağrılır. */
@@ -534,6 +615,20 @@ class MainViewModel : ViewModel() {
                 errorMessage = if (finalPlans.isEmpty()) "Bu iki nokta arasında uygun rota bulunamadı." else null
             )
             if (finalPlans.isNotEmpty()) {
+                journeyHistoryManager?.let { mgr ->
+                    mgr.add(
+                        JourneyHistoryEntry(
+                            originName = o.name,
+                            originLat = o.lat,
+                            originLng = o.lng,
+                            destName = d.name,
+                            destLat = d.lat,
+                            destLng = d.lng,
+                            ts = System.currentTimeMillis()
+                        )
+                    )
+                    _uiState.value = _uiState.value.copy(journeyHistory = mgr.getHistory())
+                }
                 startPlanEtaLoop()
             } else {
                 planEtaJob?.cancel()
