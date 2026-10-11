@@ -61,16 +61,17 @@ jobs:
           prerelease: true
           files: app/build/outputs/apk/debug/app-debug.apk
           body: |
-            GoIt Bursa Transit v1.2.0
+            GoIt Bursa Transit v1.3.0
 
-            - Moovit-style place-to-place trip flow (origin & destination are POIs/venues; stops resolved only at plan time)
-            - Manual "Rota Bul" trigger on destination selection (no unexpected auto-planning)
-            - "Konumumu kullan" GPS button on origin selection
-            - Staged legs summary ("6 dk yürü → 38 (12 durak) → 4 dk yürü") with walking legs (access, transfer, egress)
-            - Direct routes strictly ranked above transfers; "Sadece yürü" option for distances <= 2 km
-            - Map draws ONLY the selected plan (dashed walking legs, blue 1st bus, orange 2nd bus, transfer point marker)
-            - Routes tab: live ETAs for nearest stop on top (~15 s loop), favorites, recent, and collapsible "Tüm Hatlar (409)" catalog
-            - Google Maps link integration: open links/coordinates directly from external apps or paste into search box
+            - Live Directions Journey Mode: staged walking/waiting/riding guidance with live stop counting, ETA polling, and alight alerts
+            - Google Maps Link Resolution: share or paste Google Maps links/places to resolve coordinates via embed lookup and CID decoding
+            - First-Run Onboarding: permission guide and comprehensive tab tour on initial launch
+            - Vehicle Amenity Badges: air conditioner (AC) and wheelchair accessibility indicators on live boards and stops
+            - Saved Places & History: Home/Work shortcuts, bookmarked places, and recent journey history
+            - Route Sorting Options: filter alternatives by Recommended, Fastest, Least Walking, and Least Transfers
+            - Settings Screen: customizable walking distance limits (access & transfer) and saved places manager
+            - Single "Sen burdasın" badge: guaranteed single nearest-stop indicator on stops and route timeline
+            - Distance-based bus durations with live board ETAs and arrival times
             - 16 KB page-size verified (MapLibre 11.13.5, AGP 8.5.2)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

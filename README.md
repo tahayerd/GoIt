@@ -5,30 +5,46 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 ## Features
 
 ### Yol Tarifi (Trip Planner)
-- Search a place or venue by name; GoIt resolves it to the nearest stop.
-- Plans the trip from your nearest stop to the destination (same-route first, one-transfer fallback).
-- Uses a baked-in local station/POI database (13,922 records); falls back to Nominatim (OSM) for places not found locally.
-- Map shows the route line, A/B endpoints and a stop timeline with a direction toggle.
+- Search places, POIs, or stations; GoIt resolves them using the baked-in station database (13,922 records) and falls back to Nominatim (OSM).
+- **Google Maps Integration:** Share or paste Google Maps links (short links, embed URLs, CID hex coordinates) directly into GoIt to set trip endpoints.
+- **Alternative Routes & Sorting:** Sort route alternatives by **Önerilen** (Recommended), **En Hızlı** (Fastest), **Az Yürüme** (Least Walking), or **Az Aktarma** (Least Transfers).
+- **Realistic Durations & Live ETAs:** Distance-based bus run times (~22 km/h + dwell times), live board ETAs (`~X dk sonra`), and calculated arrival times.
+- **Kayıtlı Yerler & Geçmiş:** One-tap Home (🏠) and Work (💼) shortcuts, custom bookmarked places, and recent journey history.
+
+### Canlı Yolculuk Modu (Live Directions)
+- Tap **"Yolculuğu Başlat ▶"** on any selected plan to launch full turn-by-turn transit guidance.
+- **In-App HUD Overlay & Foreground Service:**
+  - **Yürüyüş (Walk):** Live walking distance and time countdown to board stop.
+  - **Bekleme (Wait):** Live bus arrival ETA polling and prominent **"Bindim ▶"** button (or automatic speed-based transition).
+  - **Araçta (Ride):** Live stop countdown ("N durak kaldı") and next stop announcements.
+  - **İniş Uyarısı:** High-priority vibration alarm when approaching the alight stop (<= 250 m or <= 1 stop remaining).
+  - **Varış (Arrival):** Celebration alert upon reaching the final destination.
 
 ### Duraklar (Stops)
-- Nearby stops sorted by distance with live approaching-bus ETAs and fare prices.
+- Nearby stops sorted by distance with live approaching-bus ETAs, fares, and vehicle amenity indicators:
+  - ❄ **Klima (AC)**
+  - ♿ **Tekerlekli Sandalye / Engelli Erişimi**
 - Stop detail: upcoming arrivals (10 s auto-refresh), full day schedule, and served lines.
-- Favorite stops and quick "start journey" from any stop.
+- Guaranteed single nearest-stop **"Sen burdasın"** badge.
 
 ### Hatlar (Routes)
 - Full city route catalog (409 lines: bus, metro, tram) with search by code.
 - Recently used routes pinned to the top (max 15, stored locally).
-- Route detail: all stops, live vehicle positions on the map, direction chips, and fare info.
-- "Sen burdasın" badge under a stop when you are within ~150 m of it.
+- Route detail: live vehicle positions on the map with animated bus markers, speed, plate numbers, and direction filters.
 
-### Live Tracking
-- Animated bus markers with bearing/rotation, plate labels and speed.
-- Journey notifications: a foreground service alerts you with vibration when you get within ~250 m of your destination.
+### Ayarlar & Özelleştirme (Settings)
+- Configurable maximum walking distance limits:
+  - **Erişim Yürüyüşü:** 400 m, 600 m, 800 m, 1200 m
+  - **Aktarma Yürüyüşü:** 200 m, 300 m, 400 m, 600 m
+- Saved places manager and onboarding tour reset.
+
+### İlk Açılış Rehberi (Onboarding)
+- 5-step interactive tour explaining tabs, features, and managing location & notification permissions.
 
 ## Privacy
 - Zero analytics, ads, or tracker SDKs.
-- Data comes directly from Burulaş/Bursakart public REST endpoints.
-- The only third-party network call is Nominatim (OSM) for geocoding places missing from the local database.
+- Transit data comes directly from Burulaş/Bursakart public REST endpoints.
+- The only optional external lookup is Nominatim (OSM) for venues missing from the local database.
 
 ## Architecture
 - **Platform:** Android Native (Kotlin + Jetpack Compose)
@@ -36,10 +52,13 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 - **Networking:** OkHttp + kotlinx.serialization
 - **Async:** Coroutines & StateFlow (MVVM)
 - **Theme:** Material 3 with automatic dark mode
+- **16 KB Page-Size:** Fully verified native ELF alignment (AGP 8.5.2, build-tools 35.0.0, zipalign -P 16)
 
 ## Building
 APKs are built in CI only. Push to `master` (or run the workflow manually) and GitHub Actions produces `app-debug.apk`, uploaded both as a workflow artifact and as the rolling `latest` release.
 
 ## Roadmap
-- [ ] User-adjustable walking distance limits in Settings (currently Moovit defaults: access <= 800 m, transfer <= 400 m, progressive widening).
+- [ ] Timetable-based departure planning ("Şu saatte var / kalk").
+- [ ] Favorite stop approach notifications (`ApproachWatchService`).
+- [ ] Home screen widget for quick stop arrivals (`GoItWidgetProvider`).
 - [ ] Offline schedule lookup without network ping.
