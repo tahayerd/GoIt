@@ -203,18 +203,38 @@ fun MainScreen(
 
     val layers = mapLayers
 
-    // Rota çizimi
+    // Rota çizimi (plan seçili DEĞİLSE normal hat çizimi yapılır)
     LaunchedEffect(
         uiState.selectedRouteCode, uiState.selectedDirection,
-        uiState.selectedRouteStops, uiState.selectedRouteCoordinates, mapEpoch
+        uiState.selectedRouteStops, uiState.selectedRouteCoordinates,
+        uiState.selectedPlan, mapEpoch
     ) {
         val l = layers ?: return@LaunchedEffect
         if (mapEpoch == 0) return@LaunchedEffect
-        if (uiState.selectedRouteCode != null) {
+        if (uiState.selectedPlan != null) {
+            // Plan seçiliyse normal hat çizimi temizlenir (çakışma önlenir)
+            l.clearRouteOnly()
+        } else if (uiState.selectedRouteCode != null) {
             l.drawRoute(uiState.selectedRouteCoordinates, uiState.selectedDirection)
             l.drawStops(uiState.selectedRouteStops, uiState.selectedDirection)
         } else {
             l.clearRouteOnly()
+        }
+    }
+
+    // v1.2.0: Seçili planın çok bacaklı çizimi (Moovit tarzı kesikli yürüme + mavi/turuncu otobüs)
+    LaunchedEffect(uiState.selectedPlan, uiState.tripOrigin, uiState.tripDestination, mapEpoch) {
+        val l = layers ?: return@LaunchedEffect
+        if (mapEpoch == 0) return@LaunchedEffect
+        val plan = uiState.selectedPlan
+        if (plan != null) {
+            l.drawPlanLegs(
+                uiState.tripOrigin?.lat, uiState.tripOrigin?.lng,
+                uiState.tripDestination?.lat, uiState.tripDestination?.lng,
+                plan
+            )
+        } else {
+            l.clearPlanLegs()
         }
     }
 
@@ -245,17 +265,17 @@ fun MainScreen(
     }
 
     // Seçili plan varsa: uç noktalara sığdır (Yol Tarifi sekmesine geç)
-    LaunchedEffect(uiState.selectedPlan, uiState.selectedRouteStops, mapEpoch) {
+    LaunchedEffect(uiState.selectedPlan, mapEpoch) {
         val mv = mapView ?: return@LaunchedEffect
         val plan = uiState.selectedPlan ?: return@LaunchedEffect
         if (mapEpoch == 0) return@LaunchedEffect
         selectedTab = 0
         val pts = mutableListOf<LatLng>()
+        uiState.tripOrigin?.let { o -> pts.add(LatLng(o.lat, o.lng)) }
+        uiState.tripDestination?.let { d -> pts.add(LatLng(d.lat, d.lng)) }
         plan.intermediateStops.forEach { s ->
             MapUtils.latLng(s.latitude, s.longitude)?.let { pts.add(it) }
         }
-        uiState.tripOrigin?.let { o -> if (o.lat != null && o.lng != null) pts.add(LatLng(o.lat, o.lng)) }
-        uiState.tripDestination?.let { d -> if (d.lat != null && d.lng != null) pts.add(LatLng(d.lat, d.lng)) }
         if (pts.isNotEmpty()) {
             mv.getMapAsync { map ->
                 runCatching {
@@ -341,11 +361,24 @@ private fun TripSearchCard(
                         style = MaterialTheme.typography.titleMedium
                     )
                 }
+
+                // Kalkış seçerken "Konumumu kullan" GPS kısayolu
+                if (uiState.tripSearchField == "origin" && uiState.userLat != null && uiState.userLng != null) {
+                    TextButton(
+                        onClick = { viewModel.setOriginToCurrentLocation() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.MyLocation, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Mevcut Konumumu Kullan", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
                 OutlinedTextField(
                     value = uiState.tripSearchQuery,
                     onValueChange = { viewModel.onTripSearchQueryChange(it) },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Durak veya mekan adı yazın (örn: Zafer Plaza, Heykel)") },
+                    placeholder = { Text("Durak, mekan, Maps linki veya koordinat") },
                     leadingIcon = { Icon(Icons.Default.Search, null) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
@@ -371,7 +404,7 @@ private fun TripSearchCard(
                     }
                 } else if (uiState.tripSearchQuery.length >= 2 && !uiState.isTripSearching) {
                     Text(
-                        "Sonuç bulunamadı. Durak adı veya mekan adı deneyin.",
+                        "Sonuç bulunamadı. Durak adı, mekan adı veya koordinat deneyin.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp)
@@ -383,11 +416,24 @@ private fun TripSearchCard(
                     icon = Icons.Default.TripOrigin,
                     iconTint = Color(0xFF0F9D58),
                     label = "Kalkış",
-                    value = uiState.tripOrigin?.stopName ?: uiState.tripOrigin?.name,
+                    value = uiState.tripOrigin?.name,
                     hint = "Kalkış noktası seçin",
                     onClick = { viewModel.openTripSearch("origin") }
                 )
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (uiState.userLat != null && uiState.userLng != null) {
+                        TextButton(onClick = { viewModel.setOriginToCurrentLocation() }) {
+                            Icon(Icons.Default.MyLocation, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Konumumu kullan", style = MaterialTheme.typography.labelSmall)
+                        }
+                    } else {
+                        Spacer(Modifier.width(1.dp))
+                    }
                     IconButton(onClick = { viewModel.swapTripPoints() }) {
                         Icon(Icons.Default.SwapVert, "Değiştir", tint = MaterialTheme.colorScheme.primary)
                     }
@@ -396,10 +442,29 @@ private fun TripSearchCard(
                     icon = Icons.Default.Place,
                     iconTint = Color(0xFFD93025),
                     label = "Varış",
-                    value = uiState.tripDestination?.stopName ?: uiState.tripDestination?.name,
+                    value = uiState.tripDestination?.name,
                     hint = "Nereye gitmek istiyorsunuz?",
                     onClick = { viewModel.openTripSearch("dest") }
                 )
+
+                // v1.2.0: Otomatik planlama yerine açık "Rota Bul" butonu
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { viewModel.planTrip() },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = uiState.tripOrigin != null && uiState.tripDestination != null && !uiState.isTripPlanning,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    if (uiState.isTripPlanning) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Rota Aranıyor...")
+                    } else {
+                        Icon(Icons.Default.AltRoute, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Rota Bul", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
     }
@@ -450,6 +515,7 @@ private fun PlaceRow(place: PlaceResult, onSelect: () -> Unit) {
         val (icon, tint) = when (place.kind) {
             "S" -> Icons.Default.Place to Color(0xFF174EA6)
             "P" -> Icons.Default.Storefront to Color(0xFFF9AB00)
+            "G" -> Icons.Default.Map to Color(0xFFD93025)
             else -> Icons.Default.Public to Color(0xFF0F9D58)
         }
         Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
@@ -542,34 +608,78 @@ private fun PlanRow(plan: RoutePlan, onClick: () -> Unit) {
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .background(
-                    if (plan.isTransfer) Color(0xFFD93025) else Color(0xFF1A73E8),
-                    RoundedCornerShape(8.dp)
-                )
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-        ) {
-            Text(plan.routeCode, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+        // İkon / rozet
+        if (plan.isWalkOnly) {
+            Box(
+                modifier = Modifier
+                    .background(Color(0xFF757575), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Icon(Icons.Default.DirectionsWalk, "Yürüyüş", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .background(
+                        if (plan.isTransfer) Color(0xFFE37400) else Color(0xFF1A73E8),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(plan.routeCode, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+            }
         }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                "${plan.originStop.stopName} → ${plan.destinationStop.stopName}",
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2
-            )
-            if (plan.isTransfer && plan.transferStop != null) {
-                Text("Aktarma: ${plan.transferStop.stopName}", style = MaterialTheme.typography.labelSmall, color = Color(0xFFD93025))
+            // Moovit tarzı bacak şeridi
+            if (plan.isWalkOnly) {
+                Text("Sadece yürü", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "${formatDistance(plan.walkOnlyMeters)} • ~${plan.estimatedDurationMinutes} dk",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                PlanLegSummary(plan)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "Toplam ~${plan.estimatedDurationMinutes} dk" +
+                        (if (plan.totalStops > 0) " • ${plan.totalStops} durak" else "") +
+                        (if (plan.isTransfer) " • 1 aktarma" else ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Text(
-                "${plan.totalStops} durak • ~${plan.estimatedDurationMinutes} dk" + if (plan.isTransfer) " • 1 aktarma" else "",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
         Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+/** Moovit tarzı adımlar: "6 dk yürü → 38 (12 durak) → 4 dk yürü" */
+@Composable
+private fun PlanLegSummary(plan: RoutePlan) {
+    val items = mutableListOf<String>()
+    if (plan.legs.isNotEmpty()) {
+        plan.legs.forEach { leg ->
+            when (leg.kind) {
+                "walk" -> if (leg.walkMeters >= 40.0) items.add("${leg.minutes} dk yürü")
+                "bus" -> {
+                    val count = if (leg.stops.isNotEmpty()) "${leg.stops.size - 1} durak" else ""
+                    val code = leg.routeCode ?: ""
+                    items.add(if (count.isNotEmpty()) "$code ($count)" else code)
+                }
+            }
+        }
+    } else {
+        items.add(plan.routeCode)
+    }
+    Text(
+        items.joinToString(" → "),
+        style = MaterialTheme.typography.bodySmall,
+        fontWeight = FontWeight.Medium,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis
+    )
 }
 
 // =========================================================
@@ -1164,26 +1274,60 @@ private fun RoutesTab(
         val results = if (query.trim().isEmpty()) uiState.allRoutes else RouteCatalog.search(query.trim(), 120)
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            if (query.trim().isEmpty() && favRoutes.isNotEmpty()) {
-                item { SectionHeader("Favori Hatlar") }
-                items(favRoutes) { fav ->
-                    RouteRow(code = fav.title, title = fav.subtitle.ifEmpty { null }, onClick = { viewModel.selectRouteByCode(fav.title) })
+            // Arama kutusu boşken:
+            if (query.trim().isEmpty()) {
+                // 1) En yakın durağa yaklaşan hatlar (canlı ETA'lar)
+                if (uiState.nearestStopEtas.isNotEmpty()) {
+                    item {
+                        SectionHeader(
+                            if (uiState.nearestStopName != null) {
+                                "En Yakın Durak (${uiState.nearestStopName})"
+                            } else {
+                                "Yakındaki Durağa Gelen Hatlar"
+                            }
+                        )
+                    }
+                    items(uiState.nearestStopEtas) { bus ->
+                        NearestStopRouteRow(bus = bus, onClick = { viewModel.selectRouteByCode(bus.routeCode) })
+                    }
                 }
-            }
-            if (query.trim().isEmpty() && recent.isNotEmpty()) {
-                item { SectionHeader("Son Kullanılanlar") }
-                items(recent) { code ->
-                    RouteRow(code = code, title = RouteCatalog.findByCode(code)?.aciklama, onClick = { viewModel.selectRouteByCode(code) })
-                }
-                item { SectionHeader("Tüm Hatlar (${uiState.allRoutes.size})") }
-            } else if (query.trim().isEmpty()) {
-                item { SectionHeader("Tüm Hatlar (${uiState.allRoutes.size})") }
-            } else {
-                item { SectionHeader("Arama Sonuçları (${results.size})") }
-            }
 
-            items(results) { entry ->
-                RouteRow(code = entry.kod, title = entry.aciklama, onClick = { viewModel.selectRouteByCode(entry.kod) })
+                // 2) Favori Hatlar
+                if (favRoutes.isNotEmpty()) {
+                    item { SectionHeader("Favori Hatlar") }
+                    items(favRoutes) { fav ->
+                        RouteRow(code = fav.title, title = fav.subtitle.ifEmpty { null }, onClick = { viewModel.selectRouteByCode(fav.title) })
+                    }
+                }
+
+                // 3) Son Kullanılanlar
+                if (recent.isNotEmpty()) {
+                    item { SectionHeader("Son Kullanılanlar") }
+                    items(recent) { code ->
+                        RouteRow(code = code, title = RouteCatalog.findByCode(code)?.aciklama, onClick = { viewModel.selectRouteByCode(code) })
+                    }
+                }
+
+                // 4) "Tüm Hatlar (409)" aç/kapa butonu
+                item {
+                    AllRoutesToggleHeader(
+                        totalCount = uiState.allRoutes.size,
+                        isExpanded = uiState.showAllRoutes,
+                        onToggle = { viewModel.toggleShowAllRoutes() }
+                    )
+                }
+
+                if (uiState.showAllRoutes) {
+                    items(uiState.allRoutes) { entry ->
+                        RouteRow(code = entry.kod, title = entry.aciklama, onClick = { viewModel.selectRouteByCode(entry.kod) })
+                    }
+                }
+            } else {
+                // Arama kutusunda metin varsa: filtrelenmiş katalog listesi
+                item { SectionHeader("Arama Sonuçları (${results.size})") }
+                items(results) { entry ->
+                    RouteRow(code = entry.kod, title = entry.aciklama, onClick = { viewModel.selectRouteByCode(entry.kod) })
+                }
             }
         }
     }
@@ -1198,6 +1342,77 @@ private fun SectionHeader(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
     )
+}
+
+/** En yakın durağa yaklaşan hat satırı (canlı ETA rozeti ile). */
+@Composable
+private fun NearestStopRouteRow(bus: NearbyBusEta, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .background(Color(0xFF174EA6), RoundedCornerShape(8.dp))
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Text(bus.routeCode, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            RouteCatalog.findByCode(bus.routeCode)?.aciklama ?: "Hat ${bus.routeCode}",
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .background(Color(0xFF0F9D58).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+            Text(
+                bus.minutesText,
+                color = Color(0xFF0F9D58),
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelMedium
+            )
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+    }
+}
+
+/** "Tüm Hatlar (409)" genişletilebilir başlık düğmesi. */
+@Composable
+private fun AllRoutesToggleHeader(
+    totalCount: Int,
+    isExpanded: Boolean,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "Tüm Hatlar ($totalCount)",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+            contentDescription = if (isExpanded) "Gizle" else "Göster",
+            tint = MaterialTheme.colorScheme.primary
+        )
+    }
 }
 
 @Composable

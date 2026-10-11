@@ -1,7 +1,13 @@
 package com.taha.goit.data.api
 
+import com.taha.goit.data.local.StationDatabase
 import com.taha.goit.data.model.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -12,6 +18,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 import kotlin.math.*
+
+/** Planlamada yürüme adayı durak: noktaya yürüme mesafesiyle birlikte. */
+data class StopCandidate(val stop: LocalStation, val walkMeters: Double)
 
 class TransitRepository {
     private val client = OkHttpClient.Builder()
@@ -160,6 +169,7 @@ class TransitRepository {
 
     // 6. Bir Duraktan Geçen Tüm Hatlar
     suspend fun getRoutesByStop(stationId: Int): List<RouteByStopItem> = withContext(Dispatchers.IO) {
+        val cacheKey = "rbs:$stationId"
         try {
             val bodyObj = buildJsonObject { put("keyword", stationId) }
             val request = Request.Builder()
@@ -170,13 +180,15 @@ class TransitRepository {
                 .build()
 
             client.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext emptyList()
-                val str = resp.body?.string() ?: return@withContext emptyList()
+                if (!resp.isSuccessful) return@withContext cacheGet<List<RouteByStopItem>>(cacheKey) ?: emptyList()
+                val str = resp.body?.string() ?: return@withContext cacheGet<List<RouteByStopItem>>(cacheKey) ?: emptyList()
                 val parsed = json.decodeFromString<ApiResponse<List<RouteByStopItem>>>(str)
-                return@withContext parsed.result ?: emptyList()
+                val result = parsed.result ?: emptyList()
+                cachePut(cacheKey, result)
+                return@withContext result
             }
         } catch (e: Exception) {
-            emptyList()
+            cacheGet<List<RouteByStopItem>>(cacheKey) ?: emptyList()
         }
     }
 
@@ -261,146 +273,495 @@ class TransitRepository {
         return fresh
     }
 
-    // 7. A'dan B'ye Rota Planlama Motoru (Multimodal Trip Planner)
-    // Ring hatlar (38 gibi) "R" yönü kullanır; G/D hatlar ise yön filtrelidir.
-    // Aynı hat üzerinden: originIdx < destIdx kontrolü (tek yön sıralaması).
-    suspend fun planTrip(originStopId: Int, destStopId: Int): List<RoutePlan> = withContext(Dispatchers.IO) {
+    // 7. A'dan B'ye Rota Planlama Motoru (Multimodal Trip Planner, Moovit tarzı)
+    // Nokta tabanlı: kalkış/varış serbest koordinat; yürüme aday durakları çözülür.
+    // Doğrudan hatlar HER ZAMAN aktarmalıların üstünde sıralanır (süreye göre).
+    suspend fun planTrip(
+        originLat: Double,
+        originLng: Double,
+        destLat: Double,
+        destLng: Double
+    ): List<RoutePlan> = withContext(Dispatchers.IO) {
         try {
-            val originRoutes = getRoutesByStop(originStopId)
-            val destRoutes = getRoutesByStop(destStopId)
+            val originCandidates = StationDatabase.walkCandidates(originLat, originLng)
+            val destCandidates = StationDatabase.walkCandidates(destLat, destLng)
 
-            val originRouteNos = originRoutes.mapNotNull { it.routeNo }.toSet()
-            val commonRoutes = destRoutes.filter { originRouteNos.contains(it.routeNo) }
+            val directPlans = mutableListOf<RoutePlan>()
+            val transferPlans = mutableListOf<RoutePlan>()
 
-            val plans = mutableListOf<RoutePlan>()
-            val usedRouteNos = mutableSetOf<Int>()
-
-            for (common in commonRoutes) {
-                val routeNo = common.routeNo ?: continue
-                val stops = getRouteStops(routeNo)
-
-                // Ring hat: "R" yönünde tek sıra. G/D: her iki yön de denenir.
-                val directions = stops.mapNotNull { it.direction }.distinct()
-                for (dir in directions) {
-                    if (dir == "G" || dir == "D" || dir == "R") {
-                        val dirStops = stops.filter { it.direction == dir }.sortedBy { it.sequence }
-                        val originIdx = dirStops.indexOfFirst { it.stopId == originStopId }
-                        val destIdx = dirStops.indexOfFirst { it.stopId == destStopId }
-                        if (originIdx != -1 && destIdx != -1 && originIdx != destIdx) {
-                            val tripStops: List<RouteStop>
-                            val stopCount: Int
-                            if (originIdx < destIdx) {
-                                tripStops = dirStops.subList(originIdx, destIdx + 1)
-                                stopCount = tripStops.size - 1
-                            } else if (dir == "R") {
-                                // Ring hatta geriye doğru: döngüyü tamamlar
-                                tripStops = dirStops.subList(originIdx, dirStops.size) + dirStops.subList(0, destIdx + 1)
-                                stopCount = tripStops.size - 1
-                            } else {
-                                continue // G/D yönünde ters yön: bu yönde plan yok
-                            }
-                            val duration = max(stopCount * 2, 5)
-                            if (usedRouteNos.add(routeNo)) {
-                                plans.add(
-                                    RoutePlan(
-                                        originStop = dirStops[originIdx],
-                                        destinationStop = dirStops[destIdx],
-                                        routeCode = common.routeCode ?: "",
-                                        routeName = common.routeName ?: "",
-                                        totalStops = stopCount,
-                                        estimatedDurationMinutes = duration,
-                                        intermediateStops = tripStops
-                                    )
-                                )
-                            }
-                        }
-                    }
+            // Doğrudan (aktarmasız) planlar
+            for (o in originCandidates) {
+                for (d in destCandidates) {
+                    if (o.stop.i == d.stop.i) continue
+                    directPlans.addAll(
+                        findDirectPlans(
+                            originStopId = o.stop.i,
+                            destStopId = d.stop.i,
+                            originStop = o.stop,
+                            destStop = d.stop,
+                            originLat = originLat,
+                            originLng = originLng,
+                            destLat = destLat,
+                            destLng = destLng,
+                            walkToMeters = o.walkMeters,
+                            walkFromMeters = d.walkMeters
+                        )
+                    )
                 }
             }
 
-            // Tek aktarmalı alternatifler (doğrudan hat yoksa veya azsa)
-            if (plans.size < 2) {
-                plans.addAll(findTransferPlans(originStopId, destStopId, plans.map { it.routeCode }.toSet()))
-            }
+            val bestDirect = directPlans
+                .sortedBy { it.estimatedDurationMinutes }
+                .distinctBy { it.routeCode }
+                .take(4)
 
-            return@withContext plans.sortedBy { it.estimatedDurationMinutes }.take(6)
+            // Aktarma seçenekleri (varış durağı, aktarmadan sonra yürüme ile de çözülebilir)
+            val transferResults = findTransferPlans(
+                originLat = originLat,
+                originLng = originLng,
+                destLat = destLat,
+                destLng = destLng,
+                originCandidates = originCandidates,
+                destCandidates = destCandidates,
+                excludeRouteCodes = bestDirect.map { it.routeCode }.toSet()
+            )
+
+            val bestTransfer = transferResults
+                .sortedBy { it.estimatedDurationMinutes }
+                .distinctBy { "${it.firstRouteCode}|${it.secondRouteCode}" }
+                .take(3)
+            transferPlans.addAll(bestTransfer)
+
+            // Doğrudan hatlar daima aktarmalıların üstünde; kendi içinde süre sıralı
+            val plans = bestDirect + transferPlans
+
+            if (plans.isEmpty()) {
+                return@withContext emptyList()
+            }
+            plans
         } catch (e: Exception) {
             emptyList()
         }
     }
 
-    /** Tek aktarmalı rota alternatifi bulur: origin -> transfer -> dest. */
-    private suspend fun findTransferPlans(
+    /** Tek binişli (aktarmasız) planlar: aynı hat üzerinde origin -> dest. */
+    private suspend fun findDirectPlans(
         originStopId: Int,
         destStopId: Int,
-        alreadyFound: Set<String>
+        originStop: LocalStation,
+        destStop: LocalStation,
+        originLat: Double,
+        originLng: Double,
+        destLat: Double,
+        destLng: Double,
+        walkToMeters: Double,
+        walkFromMeters: Double
     ): List<RoutePlan> {
-        val result = mutableListOf<RoutePlan>()
         val originRoutes = getRoutesByStop(originStopId)
         val destRoutes = getRoutesByStop(destStopId)
-        val destRouteNos = destRoutes.mapNotNull { it.routeNo }.toSet()
+        val originRouteNos = originRoutes.mapNotNull { it.routeNo }.toSet()
+        val commonRoutes = destRoutes.filter { originRouteNos.contains(it.routeNo) }
 
-        // Origin'den geçen her hat için: hattın duraklarından birinden dest'e giden hat var mı?
-        for (originRoute in originRoutes.take(8)) {
-            val originNo = originRoute.routeNo ?: continue
-            val originRouteCode = originRoute.routeCode ?: continue
-            if (alreadyFound.contains(originRouteCode)) continue
+        val plans = mutableListOf<RoutePlan>()
+        val usedRouteNos = mutableSetOf<Int>()
 
-            val firstLegStops = getRouteStops(originNo)
-            val firstDir = firstLegStops.mapNotNull { it.direction }.firstOrNull() ?: continue
-            val firstLeg = firstLegStops.filter { it.direction == firstDir }.sortedBy { it.sequence }
-            val originIdx = firstLeg.indexOfFirst { it.stopId == originStopId }
-            if (originIdx == -1) continue
+        for (common in commonRoutes) {
+            val routeNo = common.routeNo ?: continue
+            if (!usedRouteNos.add(routeNo)) continue
+            val stops = getRouteStops(routeNo)
+            val directions = stops.mapNotNull { it.direction }.distinct()
+            for (dir in directions) {
+                if (dir != "G" && dir != "D" && dir != "R") continue
+                val dirStops = stops.filter { it.direction == dir }.sortedBy { it.sequence }
+                val originIdx = dirStops.indexOfFirst { it.stopId == originStopId }
+                val destIdx = dirStops.indexOfFirst { it.stopId == destStopId }
+                if (originIdx == -1 || destIdx == -1 || originIdx == destIdx) continue
+                val tripStops: List<RouteStop>
+                val stopCount: Int
+                if (originIdx < destIdx) {
+                    tripStops = dirStops.subList(originIdx, destIdx + 1)
+                    stopCount = tripStops.size - 1
+                } else if (dir == "R") {
+                    tripStops = dirStops.subList(originIdx, dirStops.size) + dirStops.subList(1, destIdx + 1)
+                    stopCount = tripStops.size - 1
+                } else {
+                    continue
+                }
+                val busMinutes = max(stopCount * 2, 5)
+                val walkToMin = walkMinutes(walkToMeters)
+                val walkFromMin = walkMinutes(walkFromMeters)
+                val totalMin = INITIAL_WAIT_MIN + busMinutes + walkToMin + walkFromMin
 
-            // İlk ayağın sonraki duraklarını tara (en fazla 25 durak)
-            for (i in (originIdx + 1) until minOf(firstLeg.size, originIdx + 26)) {
-                val transferCandidate = firstLeg[i]
-                val transferId = transferCandidate.stopId ?: continue
-                val transferRoutes = getRoutesByStop(transferId)
-                val secondRoute = transferRoutes.firstOrNull {
-                    it.routeNo != null && destRouteNos.contains(it.routeNo) && it.routeCode != originRouteCode
-                } ?: continue
-
-                val secondNo = secondRoute.routeNo ?: continue
-                val secondStops = getRouteStops(secondNo)
-                val secondDirs = secondStops.mapNotNull { it.direction }.distinct()
-                var found = false
-                for (dir in secondDirs) {
-                    val sLeg = secondStops.filter { it.direction == dir }.sortedBy { it.sequence }
-                    val tIdx = sLeg.indexOfFirst { it.stopId == transferId }
-                    val dIdx = sLeg.indexOfFirst { it.stopId == destStopId }
-                    if (tIdx != -1 && dIdx != -1 && tIdx < dIdx) {
-                        val firstCount = i - originIdx
-                        val secondCount = dIdx - tIdx
-                        val total = firstCount + secondCount
-                        result.add(
-                            RoutePlan(
-                                originStop = firstLeg[originIdx],
-                                destinationStop = sLeg[dIdx],
-                                routeCode = "${originRouteCode} → ${secondRoute.routeCode}",
-                                routeName = "",
-                                totalStops = total,
-                                estimatedDurationMinutes = max(total * 2 + 3, 10),
-                                intermediateStops = firstLeg.subList(originIdx, i + 1) + sLeg.subList(tIdx, dIdx + 1),
-                                isTransfer = true,
-                                firstRouteCode = originRouteCode,
-                                secondRouteCode = secondRoute.routeCode ?: "",
-                                transferStop = transferCandidate
+                val legs = buildList {
+                    if (walkToMeters >= MIN_WALK_LEG_M) {
+                        add(
+                            PlanLeg(
+                                kind = "walk",
+                                walkMeters = walkToMeters,
+                                minutes = walkToMin,
+                                alightStop = tripStops.firstOrNull()
                             )
                         )
-                        found = true
-                        break
+                    }
+                    add(
+                        PlanLeg(
+                            kind = "bus",
+                            routeCode = common.routeCode,
+                            routeNo = routeNo,
+                            routeTitle = common.routeName,
+                            direction = dir,
+                            boardStop = tripStops.firstOrNull(),
+                            alightStop = tripStops.lastOrNull(),
+                            stops = tripStops,
+                            minutes = busMinutes
+                        )
+                    )
+                    if (walkFromMeters >= MIN_WALK_LEG_M) {
+                        add(
+                            PlanLeg(
+                                kind = "walk",
+                                walkMeters = walkFromMeters,
+                                minutes = walkFromMin,
+                                boardStop = tripStops.lastOrNull()
+                            )
+                        )
                     }
                 }
-                if (found) break
+
+                plans.add(
+                    RoutePlan(
+                        originStop = tripStops.first(),
+                        destinationStop = tripStops.last(),
+                        routeCode = common.routeCode ?: "",
+                        routeName = common.routeName ?: "",
+                        totalStops = stopCount,
+                        estimatedDurationMinutes = totalMin,
+                        intermediateStops = tripStops,
+                        legs = legs,
+                        walkToMeters = walkToMeters,
+                        walkFromMeters = walkFromMeters,
+                        firstLegDirection = dir
+                    )
+                )
+                break // aynı hat için ilk geçerli yön yeterli
             }
-            if (result.size >= 3) break
+        }
+        return plans
+    }
+
+    /**
+     * Tek aktarmalı planlar: yürüme erişimi -> hat 1 -> (yürüme) aktarma -> hat 2 -> varış.
+     * Varış durağı, son binişten sonra yürüme ile de çözülebilir.
+     */
+    private suspend fun findTransferPlans(
+        originLat: Double,
+        originLng: Double,
+        destLat: Double,
+        destLng: Double,
+        originCandidates: List<Pair<LocalStation, Double>>,
+        destCandidates: List<Pair<LocalStation, Double>>,
+        excludeRouteCodes: Set<String>
+    ): List<RoutePlan> {
+        val result = mutableListOf<RoutePlan>()
+        val destStopIds = destCandidates.map { it.stop.i }.toSet()
+        val destStopById = destCandidates.associateBy { it.stop.i }
+        val destRouteNos = mutableSetOf<Int>()
+        for (d in destCandidates) {
+            destRouteNos.addAll(getRoutesByStop(d.stop.i).mapNotNull { it.routeNo })
+        }
+        if (destRouteNos.isEmpty()) return result
+
+        // 1) İlk bacağın adayları: origin'e yürünebilir duraklardan geçen hatlar
+        val firstLegCandidates = mutableListOf<Triple<LocalStation, Double, RouteByStopItem>>()
+        for (o in originCandidates) {
+            val routes = getRoutesByStop(o.stop.i)
+            for (r in routes) {
+                if (r.routeNo == null) continue
+                val code = r.routeCode ?: continue
+                if (excludeRouteCodes.contains(code)) continue
+                firstLegCandidates.add(Triple(o.stop, o.walkMeters, r))
+            }
+        }
+        // En umut verici adayları önce dene (çok fazla ağ çağrısı yapmamak için sınır)
+        val tried = mutableSetOf<String>()
+
+        for ((originStop, walkToM, firstRoute) in firstLegCandidates.take(14)) {
+            val firstNo = firstRoute.routeNo ?: continue
+            val firstCode = firstRoute.routeCode ?: continue
+            val firstStops = getRouteStops(firstNo)
+            val firstDirs = firstStops.mapNotNull { it.direction }.distinct()
+            for (dir in firstDirs) {
+                if (dir != "G" && dir != "D" && dir != "R") continue
+                val dirStops = firstStops.filter { it.direction == dir }.sortedBy { it.sequence }
+                val originIdx = dirStops.indexOfFirst { it.stopId == originStop.i }
+                if (originIdx == -1) continue
+
+                // İlk bacağın sonraki duraklarını tara (en fazla 28 durak ileri)
+                val scanLimit = minOf(dirStops.size, originIdx + 29)
+                for (i in (originIdx + 1) until scanLimit) {
+                    val hopStop = dirStops[i]
+                    val hopId = hopStop.stopId ?: continue
+                    // Dest durağına ulaştık mı? (doğrudan binilebilir) -> atla (doğrudan planlarda var)
+                    val hopRoutes = getRoutesByStop(hopId)
+                    val secondRoute = hopRoutes.firstOrNull {
+                        it.routeNo != null &&
+                            destRouteNos.contains(it.routeNo) &&
+                            it.routeCode != firstCode
+                    } ?: continue
+
+                    val secondNo = secondRoute.routeNo ?: continue
+                    val secondCode = secondRoute.routeCode ?: continue
+                    val key = "$firstCode|$secondCode"
+                    if (tried.contains(key)) break
+
+                    val secondStops = getRouteStops(secondNo)
+                    val secondDirs = secondStops.mapNotNull { it.direction }.distinct()
+                    for (sdir in secondDirs) {
+                        val sLeg = secondStops.filter { it.direction == sdir }.sortedBy { it.sequence }
+                        val hopIdx = sLeg.indexOfFirst { it.stopId == hopId }
+                        if (hopIdx == -1) continue
+
+                        // 2a) Son durak adayı doğrudan binişte: hop -> destStop
+                        val directDest = destCandidates.firstOrNull { d ->
+                            val di = sLeg.indexOfFirst { it.stopId == d.stop.i }
+                            di != -1 && di > hopIdx
+                        }
+                        if (directDest != null) {
+                            val di = sLeg.indexOfFirst { it.stopId == directDest.stop.i }
+                            val p = buildTransferPlan(
+                                firstStops = dirStops.subList(originIdx, i + 1),
+                                secondStops = sLeg.subList(hopIdx, di + 1),
+                                firstCode = firstCode,
+                                firstNo = firstNo,
+                                firstRouteName = firstRoute.routeName,
+                                secondCode = secondCode,
+                                secondNo = secondNo,
+                                secondRouteName = secondRoute.routeName,
+                                firstDir = dir,
+                                secondDir = sdir,
+                                originStop = originStop,
+                                destStop = directDest.stop,
+                                transferStop = hopStop,
+                                walkToM = walkToM,
+                                walkFromM = directDest.walkMeters,
+                                transferWalkM = 0.0,
+                                originLat = originLat,
+                                originLng = originLng,
+                                destLat = destLat,
+                                destLng = destLng
+                            )
+                            result.add(p)
+                            tried.add(key)
+                            break
+                        }
+
+                        // 2b) Varış durağı yürüme ile: ikinci hataktan inilecek durağı tara
+                        // (varış adayına 400 m içinde bir durak bul)
+                        val alightScan = minOf(sLeg.size, hopIdx + 40)
+                        var found = false
+                        for (j in (hopIdx + 1) until alightScan) {
+                            val alight = sLeg[j]
+                            val alightId = alight.stopId ?: continue
+                            // Bu durak bir varış adayına yürüme mesafesinde mi?
+                            var walkFromCandidate: Pair<LocalStation, Double>? = null
+                            if (destStopIds.contains(alightId)) {
+                                walkFromCandidate = destStopById[alightId]
+                            } else {
+                                // Yürüme ile varış: en yakın varış adayına mesafe
+                                for (d in destCandidates) {
+                                    val dist = calculateDistanceMeters(
+                                        alight.latitude?.toDoubleOrNull() ?: continue,
+                                        alight.longitude?.toDoubleOrNull() ?: continue,
+                                        d.stop.la, d.stop.lo
+                                    )
+                                    if (dist <= MAX_TRANSFER_WALK_M) {
+                                        walkFromCandidate = d
+                                        break
+                                    }
+                                }
+                            }
+                            if (walkFromCandidate == null) continue
+
+                            val between = mutableListOf<Pair<Double, Double>>()
+                            val alightLat = alight.latitude?.toDoubleOrNull()
+                            val alightLng = alight.longitude?.toDoubleOrNull()
+                            if (alightLat != null && alightLng != null) {
+                                between.add(alightLat to alightLng)
+                            }
+                            val transferWalk = if (between.isNotEmpty()) {
+                                calculateDistanceMeters(
+                                    between.first().first, between.first().second,
+                                    walkFromCandidate.stop.la, walkFromCandidate.stop.lo
+                                )
+                            } else 0.0
+
+                            val p = buildTransferPlan(
+                                firstStops = dirStops.subList(originIdx, i + 1),
+                                secondStops = sLeg.subList(hopIdx, j + 1),
+                                firstCode = firstCode,
+                                firstNo = firstNo,
+                                firstRouteName = firstRoute.routeName,
+                                secondCode = secondCode,
+                                secondNo = secondNo,
+                                secondRouteName = secondRoute.routeName,
+                                firstDir = dir,
+                                secondDir = sdir,
+                                originStop = originStop,
+                                destStop = walkFromCandidate.stop,
+                                transferStop = hopStop,
+                                walkToM = walkToM,
+                                walkFromM = walkFromCandidate.second,
+                                transferWalkM = transferWalk,
+                                originLat = originLat,
+                                originLng = originLng,
+                                destLat = destLat,
+                                destLng = destLng
+                            )
+                            result.add(p)
+                            tried.add(key)
+                            found = true
+                            break
+                        }
+                        if (found) break
+                    }
+                    if (tried.contains(key)) break
+                }
+                if (tried.contains("$firstCode|*")) break
+            }
+            if (result.size >= 4) break
         }
         return result
     }
 
+    private fun buildTransferPlan(
+        firstStops: List<RouteStop>,
+        secondStops: List<RouteStop>,
+        firstCode: String,
+        firstNo: Int,
+        firstRouteName: String?,
+        secondCode: String,
+        secondNo: Int,
+        secondRouteName: String?,
+        firstDir: String,
+        secondDir: String,
+        originStop: LocalStation,
+        destStop: LocalStation,
+        transferStop: RouteStop,
+        walkToM: Double,
+        walkFromM: Double,
+        transferWalkM: Double,
+        originLat: Double,
+        originLng: Double,
+        destLat: Double,
+        destLng: Double
+    ): RoutePlan {
+        val firstCount = firstStops.size - 1
+        val secondCount = secondStops.size - 1
+        val total = firstCount + secondCount
+        val busMinutes = max(total * 2, 8)
+        val walkToMin = walkMinutes(walkToM)
+        val walkFromMin = walkMinutes(walkFromM)
+        val transferWalkMin = walkMinutes(transferWalkM)
+        val totalMin = INITIAL_WAIT_MIN + busMinutes + walkToMin + walkFromMin +
+                transferWalkMin + TRANSFER_WAIT_MIN
+
+        val legs = buildList {
+            if (walkToM >= MIN_WALK_LEG_M) {
+                add(PlanLeg(kind = "walk", walkMeters = walkToM, minutes = walkToMin, alightStop = firstStops.firstOrNull()))
+            }
+            add(
+                PlanLeg(
+                    kind = "bus",
+                    routeCode = firstCode,
+                    routeNo = firstNo,
+                    routeTitle = firstRouteName,
+                    direction = firstDir,
+                    boardStop = firstStops.firstOrNull(),
+                    alightStop = firstStops.lastOrNull(),
+                    stops = firstStops,
+                    minutes = firstCount * 2
+                )
+            )
+            if (transferWalkM >= MIN_WALK_LEG_M) {
+                add(PlanLeg(kind = "walk", walkMeters = transferWalkM, minutes = transferWalkMin, boardStop = secondStops.firstOrNull()))
+            }
+            add(
+                PlanLeg(
+                    kind = "bus",
+                    routeCode = secondCode,
+                    routeNo = secondNo,
+                    routeTitle = secondRouteName,
+                    direction = secondDir,
+                    boardStop = secondStops.firstOrNull(),
+                    alightStop = secondStops.lastOrNull(),
+                    stops = secondStops,
+                    minutes = secondCount * 2
+                )
+            )
+            if (walkFromM >= MIN_WALK_LEG_M) {
+                add(PlanLeg(kind = "walk", walkMeters = walkFromM, minutes = walkFromMin, boardStop = secondStops.lastOrNull()))
+            }
+        }
+
+        return RoutePlan(
+            originStop = firstStops.first(),
+            destinationStop = secondStops.last(),
+            routeCode = "$firstCode → $secondCode",
+            routeName = "",
+            totalStops = total,
+            estimatedDurationMinutes = totalMin,
+            intermediateStops = firstStops + secondStops.drop(1),
+            isTransfer = true,
+            firstRouteCode = firstCode,
+            secondRouteCode = secondCode,
+            transferStop = transferStop,
+            legs = legs,
+            walkToMeters = walkToM,
+            walkFromMeters = walkFromM,
+            transferWalkMeters = transferWalkM,
+            secondLegBoardStop = secondStops.firstOrNull(),
+            firstLegDirection = firstDir,
+            secondLegDirection = secondDir
+        )
+    }
+
+    /** "Sadece yürü" planı (≤2 km). */
+    fun walkOnlyPlan(
+        originLat: Double,
+        originLng: Double,
+        destLat: Double,
+        destLng: Double
+    ): RoutePlan {
+        val meters = calculateDistanceMeters(originLat, originLng, destLat, destLng)
+        val minutes = walkMinutes(meters)
+        return RoutePlan(
+            originStop = RouteStop(stopName = "Kalkış"),
+            destinationStop = RouteStop(stopName = "Varış"),
+            routeCode = "Yürüyüş",
+            routeName = "",
+            totalStops = 0,
+            estimatedDurationMinutes = minutes,
+            intermediateStops = emptyList(),
+            legs = listOf(PlanLeg(kind = "walk", walkMeters = meters, minutes = minutes)),
+            isWalkOnly = true,
+            walkOnlyMeters = meters
+        )
+    }
+
+    /** Yürüme süresi: 12 dk/km (Moovit benzeri). */
+    private fun walkMinutes(meters: Double): Int {
+        if (meters <= 0.0) return 0
+        return max(1, Math.round(meters / 1000.0 * 12.0).toInt())
+    }
+
     // Mesafe Hesaplama (Haversine - Metre Cinsinden)
     companion object {
+        // Planlama sabitleri (Moovit benzeri varsayılanlar)
+        private const val INITIAL_WAIT_MIN = 3
+        private const val TRANSFER_WAIT_MIN = 5
+        private const val MIN_WALK_LEG_M = 40.0
+        private const val MAX_TRANSFER_WALK_M = 400.0
+
         fun calculateDistanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
             val earthRadius = 6371000.0 // Metre
             val dLat = Math.toRadians(lat2 - lat1)

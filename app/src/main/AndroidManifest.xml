@@ -26,6 +26,38 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Google Maps linkleri: geo: şeması -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="geo" />
+            </intent-filter>
+
+            <!-- Google Maps web linkleri: maps.google.com, www.google.com/maps, goo.gl, maps.app.goo.gl -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="maps.google.com" />
+                <data android:host="maps.google.com.tr" />
+                <data android:host="goo.gl" android:pathPrefix="/maps" />
+                <data android:host="maps.app.goo.gl" />
+            </intent-filter>
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="www.google.com" android:pathPrefix="/maps" />
+                <data android:host="google.com" android:pathPrefix="/maps" />
+                <data android:host="www.google.com.tr" android:pathPrefix="/maps" />
+                <data android:host="google.com.tr" android:pathPrefix="/maps" />
+            </intent-filter>
         </activity>
 
         <service

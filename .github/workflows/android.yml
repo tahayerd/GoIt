@@ -61,11 +61,16 @@ jobs:
           prerelease: true
           files: app/build/outputs/apk/debug/app-debug.apk
           body: |
-            Automatic debug build of the GoIt Bursa transit app.
+            GoIt Bursa Transit v1.2.0
 
-            - Tab 1 "Yol Tarifi": A-to-B trip planning (search a place, resolve nearest stop, route alternatives incl. 1-transfer)
-            - Tab 2 "Duraklar": nearby stops with live ETA minutes and card prices
-            - Tab 3 "Hatlar": full route catalog (409 lines), recently used on top, live vehicles per stop, "Sen burdasın" tag
-            - Dark theme, MapLibre 11.13.5 (16 KB page-size compliant)
+            - Moovit-style place-to-place trip flow (origin & destination are POIs/venues; stops resolved only at plan time)
+            - Manual "Rota Bul" trigger on destination selection (no unexpected auto-planning)
+            - "Konumumu kullan" GPS button on origin selection
+            - Staged legs summary ("6 dk yürü → 38 (12 durak) → 4 dk yürü") with walking legs (access, transfer, egress)
+            - Direct routes strictly ranked above transfers; "Sadece yürü" option for distances <= 2 km
+            - Map draws ONLY the selected plan (dashed walking legs, blue 1st bus, orange 2nd bus, transfer point marker)
+            - Routes tab: live ETAs for nearest stop on top (~15 s loop), favorites, recent, and collapsible "Tüm Hatlar (409)" catalog
+            - Google Maps link integration: open links/coordinates directly from external apps or paste into search box
+            - 16 KB page-size verified (MapLibre 11.13.5, AGP 8.5.2)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

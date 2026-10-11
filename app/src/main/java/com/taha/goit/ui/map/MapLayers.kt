@@ -39,11 +39,20 @@ class MapLayers(private val map: MapLibreMap) {
         const val LAYER_USER = "goit-user-layer"
         const val SRC_PLAN = "goit-plan-src"
         const val LAYER_PLAN = "goit-plan-layer"
+
+        // v1.2.0: Moovit tarzı çok bacaklı plan katmanları
+        const val SRC_PLAN_LEGS = "goit-plan-legs-src"
+        const val LAYER_PLAN_WALK = "goit-plan-walk-layer"
+        const val LAYER_PLAN_BUS1 = "goit-plan-bus1-layer"
+        const val LAYER_PLAN_BUS2 = "goit-plan-bus2-layer"
+        const val LAYER_PLAN_TRANSFER = "goit-plan-transfer-layer"
+
         const val BUS_ICON_ID = "goit-bus-icon"
         const val STOP_ICON_ID = "goit-stop-icon"
         const val HERE_ICON_ID = "goit-here-icon"
         const val PIN_A_ICON_ID = "goit-pin-a"
         const val PIN_B_ICON_ID = "goit-pin-b"
+        const val TRANSFER_ICON_ID = "goit-transfer-pin"
     }
 
     private var style: Style? = null
@@ -51,7 +60,7 @@ class MapLayers(private val map: MapLibreMap) {
     // Yön hesabı için son çizilen güzergah noktaları (lat,lng çiftleri)
     private var lastRoutePoints: List<Pair<Double, Double>> = emptyList()
 
-    fun setup(style: Style, busIcon: Bitmap, stopIcon: Bitmap, userIcon: Bitmap, hereIcon: Bitmap? = null, pinAIcon: Bitmap? = null, pinBIcon: Bitmap? = null) {
+    fun setup(style: Style, busIcon: Bitmap, stopIcon: Bitmap, userIcon: Bitmap, hereIcon: Bitmap? = null, pinAIcon: Bitmap? = null, pinBIcon: Bitmap? = null, transferIcon: Bitmap? = null) {
         this.style = style
         runCatching {
             style.addImage(BUS_ICON_ID, busIcon)
@@ -60,8 +69,9 @@ class MapLayers(private val map: MapLibreMap) {
             if (hereIcon != null) style.addImage(HERE_ICON_ID, hereIcon)
             if (pinAIcon != null) style.addImage(PIN_A_ICON_ID, pinAIcon)
             if (pinBIcon != null) style.addImage(PIN_B_ICON_ID, pinBIcon)
+            if (transferIcon != null) style.addImage(TRANSFER_ICON_ID, transferIcon)
 
-            // Güzergah çizgisi kaynağı
+            // Güzergah çizgisi kaynağı (normal hat görüntüleme için tek renk)
             style.addSource(GeoJsonSource(SRC_ROUTE))
             style.addLayer(
                 LineLayer(LAYER_ROUTE_LINE, SRC_ROUTE).withProperties(
@@ -71,6 +81,56 @@ class MapLayers(private val map: MapLibreMap) {
                     PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                     PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
                 )
+            )
+
+            // v1.2.0: Çok bacaklı plan çizgileri (Moovit tarzı)
+            style.addSource(GeoJsonSource(SRC_PLAN_LEGS))
+            // 1) Yürüme çizgisi (kesikli gri)
+            style.addLayer(
+                LineLayer(LAYER_PLAN_WALK, SRC_PLAN_LEGS)
+                    .withFilter(Expression.eq(Expression.get("kind"), "walk"))
+                    .withProperties(
+                        PropertyFactory.lineColor("#757575"),
+                        PropertyFactory.lineWidth(4.5f),
+                        PropertyFactory.lineDasharray(arrayOf(2f, 2f)),
+                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
+                    )
+            )
+            // 2) 1. otobüs bacağı (mavi)
+            style.addLayer(
+                LineLayer(LAYER_PLAN_BUS1, SRC_PLAN_LEGS)
+                    .withFilter(Expression.eq(Expression.get("kind"), "bus1"))
+                    .withProperties(
+                        PropertyFactory.lineColor("#1A73E8"),
+                        PropertyFactory.lineWidth(6.5f),
+                        PropertyFactory.lineOpacity(0.9f),
+                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
+                    )
+            )
+            // 3) 2. otobüs bacağı (turuncu/kırmızı - aktarma)
+            style.addLayer(
+                LineLayer(LAYER_PLAN_BUS2, SRC_PLAN_LEGS)
+                    .withFilter(Expression.eq(Expression.get("kind"), "bus2"))
+                    .withProperties(
+                        PropertyFactory.lineColor("#F29900"),
+                        PropertyFactory.lineWidth(6.5f),
+                        PropertyFactory.lineOpacity(0.9f),
+                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
+                    )
+            )
+            // 4) Aktarma noktası çemberi / ikonu
+            style.addLayer(
+                org.maplibre.android.style.layers.CircleLayer(LAYER_PLAN_TRANSFER, SRC_PLAN_LEGS)
+                    .withFilter(Expression.eq(Expression.get("kind"), "transfer_point"))
+                    .withProperties(
+                        PropertyFactory.circleRadius(8f),
+                        PropertyFactory.circleColor("#F29900"),
+                        PropertyFactory.circleStrokeWidth(2.5f),
+                        PropertyFactory.circleStrokeColor(0xFFFFFFFF.toInt())
+                    )
             )
 
             // Durak kaynağı ve katmanı (pin + isim etiketi)
@@ -133,6 +193,108 @@ class MapLayers(private val map: MapLibreMap) {
                     PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM)
                 )
             )
+        }
+    }
+
+    /**
+     * Seçilen tek bir planın bacaklarını çizer (Moovit tarzı):
+     *  - Yürüme bacakları: kesikli çizgi
+     *  - 1. otobüs bacağı: mavi çizgi
+     *  - 2. otobüs bacağı: turuncu çizgi
+     *  - Aktarma noktası: turuncu çember
+     */
+    fun drawPlanLegs(
+        originLat: Double?,
+        originLng: Double?,
+        destLat: Double?,
+        destLng: Double?,
+        plan: com.taha.goit.data.model.RoutePlan
+    ) {
+        val features = mutableListOf<Feature>()
+
+        // 1. Sadece yürüme planı ise
+        if (plan.isWalkOnly) {
+            if (originLat != null && originLng != null && destLat != null && destLng != null) {
+                val line = LineString.fromLngLats(
+                    listOf(Point.fromLngLat(originLng, originLat), Point.fromLngLat(destLng, destLat))
+                )
+                features.add(Feature.fromGeometry(line).apply { addStringProperty("kind", "walk") })
+            }
+            style?.getSourceAs<GeoJsonSource>(SRC_PLAN_LEGS)?.setGeoJson(FeatureCollection.fromFeatures(features))
+            return
+        }
+
+        var busIndex = 0
+        var prevPoint: Pair<Double, Double>? = if (originLat != null && originLng != null) originLat to originLng else null
+
+        for (leg in plan.legs) {
+            when (leg.kind) {
+                "walk" -> {
+                    val p1 = prevPoint
+                    val p2 = when {
+                        leg.boardStop != null -> {
+                            val la = leg.boardStop.latitude?.toDoubleOrNull()
+                            val lo = leg.boardStop.longitude?.toDoubleOrNull()
+                            if (la != null && lo != null) la to lo else null
+                        }
+                        leg.alightStop != null -> {
+                            val la = leg.alightStop.latitude?.toDoubleOrNull()
+                            val lo = leg.alightStop.longitude?.toDoubleOrNull()
+                            if (la != null && lo != null) la to lo else null
+                        }
+                        else -> if (destLat != null && destLng != null) destLat to destLng else null
+                    }
+                    if (p1 != null && p2 != null) {
+                        val line = LineString.fromLngLats(
+                            listOf(Point.fromLngLat(p1.second, p1.first), Point.fromLngLat(p2.second, p2.first))
+                        )
+                        features.add(Feature.fromGeometry(line).apply { addStringProperty("kind", "walk") })
+                        prevPoint = p2
+                    }
+                }
+                "bus" -> {
+                    busIndex++
+                    val busKind = if (busIndex == 1) "bus1" else "bus2"
+                    val pts = leg.stops.mapNotNull { s ->
+                        val la = s.latitude?.toDoubleOrNull() ?: return@mapNotNull null
+                        val lo = s.longitude?.toDoubleOrNull() ?: return@mapNotNull null
+                        Point.fromLngLat(lo, la)
+                    }
+                    if (pts.size >= 2) {
+                        features.add(
+                            Feature.fromGeometry(LineString.fromLngLats(pts)).apply {
+                                addStringProperty("kind", busKind)
+                            }
+                        )
+                        val last = leg.stops.lastOrNull()
+                        val la = last?.latitude?.toDoubleOrNull()
+                        val lo = last?.longitude?.toDoubleOrNull()
+                        if (la != null && lo != null) prevPoint = la to lo
+                    }
+                }
+            }
+        }
+
+        // Aktarma noktası işareti
+        if (plan.isTransfer && plan.transferStop != null) {
+            val tla = plan.transferStop.latitude?.toDoubleOrNull()
+            val tlo = plan.transferStop.longitude?.toDoubleOrNull()
+            if (tla != null && tlo != null) {
+                features.add(
+                    Feature.fromGeometry(Point.fromLngLat(tlo, tla)).apply {
+                        addStringProperty("kind", "transfer_point")
+                    }
+                )
+            }
+        }
+
+        style?.getSourceAs<GeoJsonSource>(SRC_PLAN_LEGS)?.setGeoJson(FeatureCollection.fromFeatures(features))
+    }
+
+    /** Plan bacakları katmanını temizler. */
+    fun clearPlanLegs() {
+        runCatching {
+            style?.getSourceAs<GeoJsonSource>(SRC_PLAN_LEGS)?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
         }
     }
 
@@ -289,6 +451,7 @@ class MapLayers(private val map: MapLibreMap) {
             style?.getSourceAs<GeoJsonSource>(SRC_STOPS)?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
             style?.getSourceAs<GeoJsonSource>(SRC_BUSES)?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
             style?.getSourceAs<GeoJsonSource>(SRC_PLAN)?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
+            style?.getSourceAs<GeoJsonSource>(SRC_PLAN_LEGS)?.setGeoJson(FeatureCollection.fromFeatures(emptyList<Feature>()))
         }
     }
 

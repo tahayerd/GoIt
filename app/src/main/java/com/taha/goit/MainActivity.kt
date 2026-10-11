@@ -1,16 +1,20 @@
 package com.taha.goit
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
 import com.taha.goit.service.JourneyService
 import com.taha.goit.ui.MainScreen
 import com.taha.goit.ui.MainViewModel
 import com.taha.goit.ui.theme.GoItTheme
+import com.taha.goit.util.MapsLinkParser
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -32,6 +36,9 @@ class MainActivity : ComponentActivity() {
         }
         permissionLauncher.launch(permissions.toTypedArray())
 
+        // Dışarıdan gelen Google Maps Intent'ini işle
+        handleIncomingIntent(intent)
+
         setContent {
             GoItTheme {
                 MainScreen(
@@ -42,6 +49,27 @@ class MainActivity : ComponentActivity() {
                         JourneyService.start(this, lat, lng, name)
                     }
                 )
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action
+        if (action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        val uriString = uri.toString()
+
+        lifecycleScope.launch {
+            val parsed = MapsLinkParser.parse(uriString)
+            if (parsed != null) {
+                viewModel.setDestinationFromExternal(parsed.lat, parsed.lng, parsed.label)
             }
         }
     }

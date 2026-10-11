@@ -10,6 +10,7 @@ import com.taha.goit.data.local.RouteCatalog
 import com.taha.goit.data.local.RouteHistoryManager
 import com.taha.goit.data.local.StationDatabase
 import com.taha.goit.data.model.*
+import com.taha.goit.util.MapsLinkParser
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -22,7 +23,7 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
-/** Arama sonucu: durak ("S"), mekan ("P") veya OSM yedeği ("O"). */
+/** Arama sonucu: durak ("S"), mekan ("P"), OSM yedeği ("O") veya Google linki ("G"). */
 data class PlaceResult(
     val name: String,
     val kind: String,
@@ -32,13 +33,12 @@ data class PlaceResult(
     val subtitle: String? = null
 )
 
-/** Yolculuk uç noktası: görünen ad + çözümlenmiş durak. */
+/** Yolculuk uç noktası: serbest nokta veya durak. */
 data class TripPoint(
     val name: String,
-    val stopName: String,
-    val stopId: Int,
-    val lat: Double?,
-    val lng: Double?
+    val lat: Double,
+    val lng: Double,
+    val isUserLocation: Boolean = false
 )
 
 /** Duraklar sekmesi: yaklaşan araç ve ücret bilgisi. */
@@ -98,6 +98,9 @@ data class MainUiState(
     // Hatlar sekmesi
     val allRoutes: List<RouteCatalogEntry> = emptyList(),
     val recentRoutes: List<String> = emptyList(),
+    val nearestStopEtas: List<NearbyBusEta> = emptyList(),
+    val nearestStopName: String? = null,
+    val showAllRoutes: Boolean = false,
     // Sekme yönlendirme olayı (örn. "Buradan Git" → Yol Tarifi sekmesi)
     val navigateToTab: Int? = null
 )
@@ -116,6 +119,7 @@ class MainViewModel : ViewModel() {
     private var etaJob: Job? = null
     private var searchJob: Job? = null
     private var nearbyJob: Job? = null
+    private var nearestEtaLoopJob: Job? = null
 
     // ---------- Başlatma ----------
 
@@ -150,20 +154,54 @@ class MainViewModel : ViewModel() {
         val base = nearest.map { (s, d) ->
             NearbyStopUi(s, d, prev[s.i]?.buses ?: emptyList())
         }
+        val firstStation = nearest.firstOrNull()?.first
         _uiState.value = _uiState.value.copy(
             userLat = lat,
             userLng = lng,
             locationAvailable = true,
             nearbyStops = base,
             isLoadingNearbyEtas = nearest.isNotEmpty(),
+            nearestStopName = firstStation?.n,
             tripOrigin = _uiState.value.tripOrigin
-                ?: nearest.firstOrNull()?.let { (s, _) -> TripPoint("Konumum", s.n, s.i, s.la, s.lo) }
+                ?: TripPoint("Konumum", lat, lng, isUserLocation = true)
         )
-        if (nearest.isNotEmpty()) loadNearbyEtas(nearest)
+        if (nearest.isNotEmpty()) {
+            loadNearbyEtas(nearest)
+            startNearestStopEtaLoop(nearest.first().first.i, nearest.first().first.n)
+        }
     }
 
     fun markLocationMissing() {
         _uiState.value = _uiState.value.copy(locationAvailable = false, isLoadingNearbyEtas = false)
+    }
+
+    /** Hatlar sekmesi: kullanıcının en yakın durağına yaklaşan hatların periyodik ETA'sı (~15 s). */
+    private fun startNearestStopEtaLoop(stopId: Int, stopName: String) {
+        nearestEtaLoopJob?.cancel()
+        nearestEtaLoopJob = viewModelScope.launch {
+            while (true) {
+                try {
+                    val raw = repository.getStationRemainingTime(stopId)
+                    val sorted = raw.mapNotNull { e ->
+                        val code = e.routeCode ?: return@mapNotNull null
+                        val t = e.realTime ?: e.passTime
+                        NearbyBusEta(code, formatEtaTime(t), parseEtaSeconds(t))
+                    }
+                        .sortedBy { it.timeSeconds }
+                        .distinctBy { it.routeCode }
+                    _uiState.value = _uiState.value.copy(
+                        nearestStopEtas = sorted,
+                        nearestStopName = stopName
+                    )
+                } catch (_: Exception) {
+                }
+                delay(15000)
+            }
+        }
+    }
+
+    fun toggleShowAllRoutes() {
+        _uiState.value = _uiState.value.copy(showAllRoutes = !_uiState.value.showAllRoutes)
     }
 
     private fun loadNearbyEtas(nearest: List<Pair<LocalStation, Double>>) {
@@ -331,8 +369,27 @@ class MainViewModel : ViewModel() {
         }
         searchJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isTripSearching = true)
-            delay(250)
             val q = query.trim()
+
+            // 1. Google Maps linki veya koordinat (40.1832, 29.0647) kontrolü
+            val parsedLocation = MapsLinkParser.parse(q)
+            if (parsedLocation != null) {
+                val direct = PlaceResult(
+                    name = parsedLocation.label ?: "Harita Konumu",
+                    kind = "G",
+                    stopId = null,
+                    lat = parsedLocation.lat,
+                    lng = parsedLocation.lng,
+                    subtitle = String.format(java.util.Locale.US, "%.5f, %.5f", parsedLocation.lat, parsedLocation.lng)
+                )
+                _uiState.value = _uiState.value.copy(
+                    tripSearchResults = listOf(direct),
+                    isTripSearching = false
+                )
+                return@launch
+            }
+
+            delay(250)
             val local = StationDatabase.search(q, 30).map {
                 PlaceResult(
                     name = it.n,
@@ -365,20 +422,9 @@ class MainViewModel : ViewModel() {
         val state = _uiState.value
         val field = state.tripSearchField ?: return
 
-        val stopId = place.stopId ?: run {
-            val la = place.lat ?: return
-            val lo = place.lng ?: return
-            StationDatabase.nearestStations(la, lo, 1).firstOrNull()?.first?.i
-        } ?: return
-
-        val localStop = StationDatabase.findById(stopId)
-        val point = TripPoint(
-            name = place.name,
-            stopName = localStop?.n ?: place.name,
-            stopId = stopId,
-            lat = localStop?.la ?: place.lat,
-            lng = localStop?.lo ?: place.lng
-        )
+        val lat = place.lat ?: return
+        val lng = place.lng ?: return
+        val point = TripPoint(name = place.name, lat = lat, lng = lng)
 
         when (field) {
             "origin" -> {
@@ -386,7 +432,10 @@ class MainViewModel : ViewModel() {
                     tripOrigin = point,
                     tripSearchField = null,
                     tripSearchQuery = "",
-                    tripSearchResults = emptyList()
+                    tripSearchResults = emptyList(),
+                    tripPlans = emptyList(),
+                    selectedPlan = null,
+                    errorMessage = null
                 )
             }
             "dest" -> {
@@ -394,49 +443,87 @@ class MainViewModel : ViewModel() {
                     tripDestination = point,
                     tripSearchField = null,
                     tripSearchQuery = "",
-                    tripSearchResults = emptyList()
+                    tripSearchResults = emptyList(),
+                    tripPlans = emptyList(),
+                    selectedPlan = null,
+                    errorMessage = null
                 )
-                planTrip()
+                // v1.2.0: Varış seçildiğinde otomatik planlama YAPILMAZ; "Rota Bul" butonuna basılması beklenir.
             }
         }
+    }
+
+    /** "Konumumu kullan" butonu: kalkış noktasını mevcut GPS koordinatına ayarlar. */
+    fun setOriginToCurrentLocation() {
+        val lat = _uiState.value.userLat
+        val lng = _uiState.value.userLng
+        if (lat != null && lng != null) {
+            _uiState.value = _uiState.value.copy(
+                tripOrigin = TripPoint("Konumum", lat, lng, isUserLocation = true),
+                tripSearchField = null,
+                tripSearchQuery = "",
+                tripSearchResults = emptyList(),
+                tripPlans = emptyList(),
+                selectedPlan = null,
+                errorMessage = null
+            )
+        }
+    }
+
+    /** Dışarıdan (Intent / Google Maps linki) gelen hedef konumu doğrudan varış noktası yapar. */
+    fun setDestinationFromExternal(lat: Double, lng: Double, label: String?) {
+        _uiState.value = _uiState.value.copy(
+            tripDestination = TripPoint(label ?: "Google Haritalar", lat, lng),
+            tripSearchField = null,
+            tripSearchQuery = "",
+            tripSearchResults = emptyList(),
+            tripPlans = emptyList(),
+            selectedPlan = null,
+            errorMessage = null,
+            navigateToTab = 0
+        )
     }
 
     fun planTrip() {
         val o = _uiState.value.tripOrigin ?: return
         val d = _uiState.value.tripDestination ?: return
-        if (o.stopId == d.stopId) {
+
+        val distance = TransitRepository.calculateDistanceMeters(o.lat, o.lng, d.lat, d.lng)
+        if (distance < 30.0) {
             _uiState.value = _uiState.value.copy(
                 tripPlans = emptyList(),
-                errorMessage = "Kalkış ve varış aynı durak. Farklı bir varış seçin."
+                errorMessage = "Kalkış ve varış aynı nokta. Farklı bir varış seçin."
             )
             return
         }
+
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isTripPlanning = true, selectedPlan = null, errorMessage = null)
-            val plans = repository.planTrip(o.stopId, d.stopId)
+            val transitPlans = repository.planTrip(o.lat, o.lng, d.lat, d.lng)
+
+            // "Sadece yürü" alternatifi (≤2 km)
+            val finalPlans = if (distance <= 2000.0) {
+                val walkPlan = repository.walkOnlyPlan(o.lat, o.lng, d.lat, d.lng)
+                listOf(walkPlan) + transitPlans
+            } else {
+                transitPlans
+            }
+
             _uiState.value = _uiState.value.copy(
-                tripPlans = plans,
+                tripPlans = finalPlans,
                 isTripPlanning = false,
-                errorMessage = if (plans.isEmpty()) "Bu iki durak arasında uygun hat bulunamadı." else null
+                errorMessage = if (finalPlans.isEmpty()) "Bu iki nokta arasında uygun rota bulunamadı." else null
             )
         }
     }
 
-    /** Plan seçildiğinde ilgili hattı açar ve haritada gösterir. */
+    /** Plan seçildiğinde: sadece seçilen plan haritada çizilir, güzergah koordinatları getirilir. */
     fun selectRouteFromPlan(plan: RoutePlan) {
-        _uiState.value = _uiState.value.copy(selectedPlan = plan)
-        val code = if (plan.isTransfer) plan.firstRouteCode else plan.routeCode
-        viewModelScope.launch {
-            val entry = RouteCatalog.findByCode(code)
-            if (entry != null) {
-                selectRoute(entry.kod, entry.hatNo)
-            } else {
-                val results = repository.searchRouteAndStation(code)
-                val route = results.firstOrNull { it.type == "R" && it.kod == code }
-                    ?: results.firstOrNull { it.type == "R" }
-                selectRoute(code, route?.hatNo)
-            }
-        }
+        _uiState.value = _uiState.value.copy(
+            selectedPlan = plan,
+            selectedRouteCode = null,
+            selectedStop = null
+        )
     }
 
     fun clearTrip() {
@@ -454,11 +541,11 @@ class MainViewModel : ViewModel() {
         val stop = _uiState.value.selectedStop ?: return
         val id = stop.stopId ?: return
         val ls = StationDatabase.findById(id)
-        val la = ls?.la ?: stop.latitude?.toDoubleOrNull()
-        val lo = ls?.lo ?: stop.longitude?.toDoubleOrNull()
+        val la = ls?.la ?: stop.latitude?.toDoubleOrNull() ?: return
+        val lo = ls?.lo ?: stop.longitude?.toDoubleOrNull() ?: return
         clearStop()
         _uiState.value = _uiState.value.copy(
-            tripOrigin = TripPoint("Durak", stop.stopName ?: ls?.n ?: "Durak", id, la, lo),
+            tripOrigin = TripPoint(stop.stopName ?: ls?.n ?: "Durak", la, lo),
             tripDestination = null,
             tripPlans = emptyList(),
             selectedPlan = null,
@@ -524,13 +611,16 @@ class MainViewModel : ViewModel() {
 
     /** Kalkış noktasını konumun en yakın durağına geri alır. */
     fun resetOriginToNearest() {
-        val nearest = _uiState.value.nearbyStops.firstOrNull() ?: return
-        _uiState.value = _uiState.value.copy(
-            tripOrigin = TripPoint("Konumum", nearest.station.n, nearest.station.i, nearest.station.la, nearest.station.lo)
-        )
+        val lat = _uiState.value.userLat
+        val lng = _uiState.value.userLng
+        if (lat != null && lng != null) {
+            _uiState.value = _uiState.value.copy(
+                tripOrigin = TripPoint("Konumum", lat, lng, isUserLocation = true)
+            )
+        }
     }
 
-    /** Kalkış ve varışı yer değiştirir ve yeniden planlar. */
+    /** Kalkış ve varışı yer değiştirir. */
     fun swapTripPoints() {
         val s = _uiState.value
         if (s.tripOrigin != null && s.tripDestination != null) {
@@ -541,7 +631,6 @@ class MainViewModel : ViewModel() {
                 selectedPlan = null,
                 errorMessage = null
             )
-            planTrip()
         }
     }
 
@@ -591,5 +680,6 @@ class MainViewModel : ViewModel() {
         etaJob?.cancel()
         searchJob?.cancel()
         nearbyJob?.cancel()
+        nearestEtaLoopJob?.cancel()
     }
 }

@@ -40,7 +40,6 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 ## Building
 APKs are built in CI only. Push to `master` (or run the workflow manually) and GitHub Actions produces `app-debug.apk`, uploaded both as a workflow artifact and as the rolling `latest` release.
 
-For local compile checks (no APK):
-```bash
-./gradlew :app:compileDebugKotlin
-```
+## Roadmap
+- [ ] User-adjustable walking distance limits in Settings (currently Moovit defaults: access <= 800 m, transfer <= 400 m, progressive widening).
+- [ ] Offline schedule lookup without network ping.

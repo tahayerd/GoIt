@@ -104,6 +104,25 @@ object StationDatabase {
         return withDist.take(limit)
     }
 
+    /** Yarıçap içindeki en yakın duraklar (yürüme erişim adayları için). */
+    fun nearestWithin(lat: Double, lng: Double, maxMeters: Double, limit: Int): List<Pair<LocalStation, Double>> {
+        val out = ArrayList<Pair<LocalStation, Double>>()
+        for (s in stations) {
+            val d = haversine(lat, lng, s.la, s.lo)
+            if (d <= maxMeters) out.add(s to d)
+        }
+        out.sortBy { it.second }
+        return if (out.size > limit) out.subList(0, limit) else out
+    }
+
+    /** Yürüme erişim adayları: ≤maxAccess; aday yoksa kademeli genişletilir. */
+    fun walkCandidates(lat: Double, lng: Double, maxAccess: Double = 800.0): List<Pair<LocalStation, Double>> {
+        var out = nearestWithin(lat, lng, maxAccess, 6)
+        if (out.isEmpty()) out = nearestWithin(lat, lng, maxAccess * 2, 4)
+        if (out.isEmpty()) out = nearestStations(lat, lng, 2)
+        return out
+    }
+
     private fun normalize(s: String): String =
         s.lowercase(Locale("tr", "TR"))
             .replace('ı', 'i').replace('ş', 's').replace('ğ', 'g')

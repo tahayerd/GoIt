@@ -82,6 +82,21 @@ data class RouteByStopItem(
 )
 
 // A-to-B Route Planning Models
+
+/** Yolculuk planındaki tek bir bacak: yürüme veya otobüs. */
+data class PlanLeg(
+    val kind: String,               // "walk" | "bus"
+    val routeCode: String? = null,  // otobüs bacağı için hat kodu
+    val routeNo: Int? = null,       // API hat numarası (güzergah koordinatı için)
+    val routeTitle: String? = null,
+    val direction: String? = null,  // G / D / R
+    val boardStop: RouteStop? = null,
+    val alightStop: RouteStop? = null,
+    val stops: List<RouteStop> = emptyList(),
+    val walkMeters: Double = 0.0,
+    val minutes: Int = 0
+)
+
 data class RoutePlan(
     val originStop: RouteStop,
     val destinationStop: RouteStop,
@@ -94,7 +109,18 @@ data class RoutePlan(
     val isTransfer: Boolean = false,
     val firstRouteCode: String = "",
     val secondRouteCode: String = "",
-    val transferStop: RouteStop? = null
+    val transferStop: RouteStop? = null,
+    // Yürüme bacakları (Moovit tarzı)
+    val legs: List<PlanLeg> = emptyList(),
+    val walkToMeters: Double = 0.0,
+    val walkFromMeters: Double = 0.0,
+    val transferWalkMeters: Double = 0.0,
+    val secondLegBoardStop: RouteStop? = null,
+    val firstLegDirection: String? = null,
+    val secondLegDirection: String? = null,
+    // Sadece yürüyüş planı
+    val isWalkOnly: Boolean = false,
+    val walkOnlyMeters: Double = 0.0
 )
 
 /** "Otobüsüm Nerede" yakındaki duraklar (activestations {enlem, boylam}). */
