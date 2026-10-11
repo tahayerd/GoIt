@@ -797,11 +797,23 @@ private fun StopDetailCard(
                             Spacer(Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(eta.routeTitle ?: "", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    eta.licencePlate ?: "",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (!eta.licencePlate.isNullOrBlank()) {
+                                        Text(
+                                            eta.licencePlate,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                    }
+                                    if (eta.isAirConditioner == true) {
+                                        Icon(Icons.Default.AcUnit, "Klima", tint = Color(0xFF0288D1), modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                    }
+                                    if (eta.isSuitableForDisabled == true) {
+                                        Icon(Icons.Default.Accessible, "Engelli Erişimi", tint = Color(0xFF1976D2), modifier = Modifier.size(14.dp))
+                                    }
+                                }
                             }
                             Text(
                                 formatEtaTime(eta.realTime ?: eta.passTime),
@@ -1255,6 +1267,14 @@ private fun NearbyStopRow(
                             color = Color(0xFF0F9D58),
                             fontWeight = FontWeight.Bold
                         )
+                        if (bus.ac == true) {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(Icons.Default.AcUnit, "Klima", tint = Color(0xFF0288D1), modifier = Modifier.size(14.dp))
+                        }
+                        if (bus.accessible == true) {
+                            Spacer(Modifier.width(4.dp))
+                            Icon(Icons.Default.Accessible, "Engelli Erişimi", tint = Color(0xFF1976D2), modifier = Modifier.size(14.dp))
+                        }
                         Spacer(Modifier.weight(1f))
                         if (bus.priceText != null) {
                             Text(bus.priceText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1436,12 +1456,22 @@ private fun NearestStopRouteRow(bus: NearbyBusEta, onClick: () -> Unit) {
                 .background(Color(0xFF0F9D58).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
                 .padding(horizontal = 8.dp, vertical = 3.dp)
         ) {
-            Text(
-                bus.minutesText,
-                color = Color(0xFF0F9D58),
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.labelMedium
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    bus.minutesText,
+                    color = Color(0xFF0F9D58),
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelMedium
+                )
+                if (bus.ac == true) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Default.AcUnit, "Klima", tint = Color(0xFF0288D1), modifier = Modifier.size(14.dp))
+                }
+                if (bus.accessible == true) {
+                    Spacer(Modifier.width(3.dp))
+                    Icon(Icons.Default.Accessible, "Engelli Erişimi", tint = Color(0xFF1976D2), modifier = Modifier.size(14.dp))
+                }
+            }
         }
         Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
     }

@@ -48,7 +48,9 @@ data class NearbyBusEta(
     val routeCode: String,
     val minutesText: String,
     val timeSeconds: Int,
-    val priceText: String? = null
+    val priceText: String? = null,
+    val ac: Boolean? = null,
+    val accessible: Boolean? = null
 )
 
 /** Duraklar sekmesi: durak + mesafe + yaklaşan araçlar. */
@@ -189,7 +191,13 @@ class MainViewModel : ViewModel() {
                     val sorted = raw.mapNotNull { e ->
                         val code = e.routeCode ?: return@mapNotNull null
                         val t = e.realTime ?: e.passTime
-                        NearbyBusEta(code, formatEtaTime(t), parseEtaSeconds(t))
+                        NearbyBusEta(
+                            routeCode = code,
+                            minutesText = formatEtaTime(t),
+                            timeSeconds = parseEtaSeconds(t),
+                            ac = e.isAirConditioner,
+                            accessible = e.isSuitableForDisabled
+                        )
                     }
                         .sortedBy { it.timeSeconds }
                         .distinctBy { it.routeCode }
@@ -235,7 +243,14 @@ class MainViewModel : ViewModel() {
                     .mapNotNull { e ->
                         val code = e.routeCode ?: return@mapNotNull null
                         val raw = e.realTime ?: e.passTime
-                        NearbyBusEta(code, formatEtaTime(raw), parseEtaSeconds(raw), prices[code])
+                        NearbyBusEta(
+                            routeCode = code,
+                            minutesText = formatEtaTime(raw),
+                            timeSeconds = parseEtaSeconds(raw),
+                            priceText = prices[code],
+                            ac = e.isAirConditioner,
+                            accessible = e.isSuitableForDisabled
+                        )
                     }
                     .sortedBy { it.timeSeconds }
                     .distinctBy { it.routeCode }
