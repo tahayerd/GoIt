@@ -44,6 +44,7 @@ import org.maplibre.android.maps.Style
 
 private const val STYLE_LIGHT = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
 private const val STYLE_DARK = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+private const val NEAR_STOP_METERS = 150.0
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1116,8 +1117,15 @@ private fun StopsTab(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                     )
                 }
+                val nearestStationId = remember(uiState.nearbyStops) {
+                    uiState.nearbyStops.firstOrNull()?.takeIf { it.distanceMeters <= NEAR_STOP_METERS }?.station?.i
+                }
                 items(uiState.nearbyStops) { row ->
-                    NearbyStopRow(row, onClick = { viewModel.selectNearbyStop(row.station) })
+                    NearbyStopRow(
+                        row = row,
+                        isNearest = row.station.i == nearestStationId,
+                        onClick = { viewModel.selectNearbyStop(row.station) }
+                    )
                 }
             }
         }
@@ -1147,7 +1155,11 @@ private fun FavoriteStopRow(fav: FavoriteItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun NearbyStopRow(row: NearbyStopUi, onClick: () -> Unit) {
+private fun NearbyStopRow(
+    row: NearbyStopUi,
+    isNearest: Boolean = false,
+    onClick: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1169,6 +1181,16 @@ private fun NearbyStopRow(row: NearbyStopUi, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+                if (isNearest) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFF0F9D58), RoundedCornerShape(50))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("Sen burdasın", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
                 Text(
                     formatDistance(row.distanceMeters),
                     style = MaterialTheme.typography.labelMedium,
@@ -1529,12 +1551,19 @@ private fun RouteDetailScreen(
             val filtered = uiState.selectedRouteStops
                 .filter { it.direction == uiState.selectedDirection || it.direction == null }
                 .sortedBy { it.sequence }
+            val nearestStopId = remember(filtered, uiState.userLat, uiState.userLng) {
+                val uLat = uiState.userLat; val uLng = uiState.userLng
+                if (uLat == null || uLng == null) null
+                else filtered.mapNotNull { s ->
+                    val la = s.latitude?.toDoubleOrNull(); val lo = s.longitude?.toDoubleOrNull()
+                    if (la != null && lo != null) s.stopId to com.taha.goit.data.api.TransitRepository.calculateDistanceMeters(uLat, uLng, la, lo) else null
+                }.minByOrNull { it.second }?.takeIf { it.second <= NEAR_STOP_METERS }?.first
+            }
             itemsIndexed(filtered) { idx, stop ->
                 RouteStopRow(
                     index = idx + 1,
                     stop = stop,
-                    userLat = uiState.userLat,
-                    userLng = uiState.userLng,
+                    isNearest = stop.stopId == nearestStopId,
                     buses = uiState.realtimeBuses,
                     onClick = { onStop(stop) }
                 )
@@ -1547,18 +1576,10 @@ private fun RouteDetailScreen(
 private fun RouteStopRow(
     index: Int,
     stop: RouteStop,
-    userLat: Double?,
-    userLng: Double?,
+    isNearest: Boolean = false,
     buses: List<com.taha.goit.data.model.BusRealtimeLocation>,
     onClick: () -> Unit
 ) {
-    val near = remember(stop.stopId, userLat, userLng) {
-        val la = stop.latitude?.toDoubleOrNull()
-        val lo = stop.longitude?.toDoubleOrNull()
-        if (la != null && lo != null && userLat != null && userLng != null) {
-            com.taha.goit.data.api.TransitRepository.calculateDistanceMeters(userLat, userLng, la, lo) <= 150.0
-        } else false
-    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1604,7 +1625,7 @@ private fun RouteStopRow(
                 }
             }
         }
-        if (near) {
+        if (isNearest) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 30.dp, top = 2.dp)) {
                 Box(
                     modifier = Modifier
