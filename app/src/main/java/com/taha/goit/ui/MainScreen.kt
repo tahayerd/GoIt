@@ -348,9 +348,6 @@ fun MainScreen(
     JourneyScreen(
         onStopJourney = {
             JourneyService.stop(context)
-        },
-        onAdvanceJourney = {
-            JourneyService.advance(context)
         }
     )
 }

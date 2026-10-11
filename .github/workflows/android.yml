@@ -61,17 +61,13 @@ jobs:
           prerelease: true
           files: app/build/outputs/apk/debug/app-debug.apk
           body: |
-            GoIt Bursa Transit v1.3.0
+            GoIt Bursa Transit v1.4.0
 
-            - Live Directions Journey Mode: staged walking/waiting/riding guidance with live stop counting, ETA polling, and alight alerts
-            - Google Maps Link Resolution: share or paste Google Maps links/places to resolve coordinates via embed lookup and CID decoding
-            - First-Run Onboarding: permission guide and comprehensive tab tour on initial launch
-            - Vehicle Amenity Badges: air conditioner (AC) and wheelchair accessibility indicators on live boards and stops
-            - Saved Places & History: Home/Work shortcuts, bookmarked places, and recent journey history
-            - Route Sorting Options: filter alternatives by Recommended, Fastest, Least Walking, and Least Transfers
-            - Settings Screen: customizable walking distance limits (access & transfer) and saved places manager
-            - Single "Sen burdasın" badge: guaranteed single nearest-stop indicator on stops and route timeline
-            - Distance-based bus durations with live board ETAs and arrival times
-            - 16 KB page-size verified (MapLibre 11.13.5, AGP 8.5.2)
+            - Fully Automatic Journey Mode (Moovit-style): boarding is auto-detected from GPS speed and distance from stop - no manual confirmation
+            - One-way stop counter: immune to GPS jitter, never counts backwards
+            - Moovit-pattern live notifications: "line arriving in ~X min", "Arriving soon - 2 stops left", "Get ready - next stop is yours", arrival celebration
+            - Redesigned journey overlay: alight-imminent warning banner, automatic detection badge, single End Trip action
+            - Slow-traffic fallback boarding detection (congested streets)
+            - (v1.3.0) Google Maps link resolution, onboarding, amenity badges, saved places, journey history, sort chips, settings
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

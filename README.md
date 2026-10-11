@@ -13,11 +13,11 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 
 ### Canlı Yolculuk Modu (Live Directions)
 - Tap **"Yolculuğu Başlat ▶"** on any selected plan to launch full turn-by-turn transit guidance.
-- **In-App HUD Overlay & Foreground Service:**
+- **In-App HUD Overlay & Foreground Service (fully automatic, Moovit-style):**
   - **Yürüyüş (Walk):** Live walking distance and time countdown to board stop.
-  - **Bekleme (Wait):** Live bus arrival ETA polling and prominent **"Bindim ▶"** button (or automatic speed-based transition).
-  - **Araçta (Ride):** Live stop countdown ("N durak kaldı") and next stop announcements.
-  - **İniş Uyarısı:** High-priority vibration alarm when approaching the alight stop (<= 250 m or <= 1 stop remaining).
+  - **Bekleme (Wait):** Live bus arrival ETA polling; boarding is **auto-detected** from GPS speed and distance from stop (no manual confirmation).
+  - **Araçta (Ride):** One-way stop countdown ("N durak kaldı") immune to GPS jitter, with next stop announcements.
+  - **İniş Uyarısı:** "Get ready" high-priority vibration alarm when approaching the alight stop (<= 250 m or <= 1 stop remaining), with red imminent-alight banner.
   - **Varış (Arrival):** Celebration alert upon reaching the final destination.
 
 ### Duraklar (Stops)

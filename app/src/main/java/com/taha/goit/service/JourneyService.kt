@@ -34,8 +34,10 @@ import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
 
 /**
- * Canlı yolculuk asistanı (V2):
+ * Canlı yolculuk asistanı (V3 — tam otomatik, Moovit tarzı):
  * - Aşamalandırılmış yolculuk modu (Yürüme -> Bekleme/ETA -> Araç/Durak sayımı -> İniş/Varış alarmları)
+ * - Kullanıcı onayı GEREKMEZ: biniş, hız + duraktan uzaklaşma ile otomatik algılanır
+ * - Durak sayacı tek yönlüdür (GPS zıplamasında asla geri saymaz)
  * - Geriye dönük uyumlu tek durak iniş alarmı (legacy mode)
  */
 class JourneyService : Service(), LocationListener {
@@ -45,18 +47,25 @@ class JourneyService : Service(), LocationListener {
     private val json = Json { ignoreUnknownKeys = true }
     private var locationManager: LocationManager? = null
 
-    // V2 Staged Mod Değişkenleri
+    // V3 Staged Mod Değişkenleri
     private var isStagedMode: Boolean = false
     private var payload: JourneyPayload? = null
     private var stages: List<JourneyStage> = emptyList()
     private var stageIndex: Int = 0
     private var initialWalkDistance: Double? = null
     private var hasAlertedCurrentStage: Boolean = false
-    private var hasWarnedTwoStops: Boolean = false
-    private var consecutiveSpeedTriggers: Int = 0
+    private var hasWarnedApproaching: Boolean = false
     private var waitEtaJob: Job? = null
     private var currentWaitEta: String? = null
     private var lastKnownLocation: Location? = null
+
+    // Otomatik biniş algılama (Bekle -> Araç geçişi)
+    private var consecutiveFastFar: Int = 0     // >12 km/h VE duraktan >150 m ( ardışık 2 fix = ~10 sn)
+    private var consecutiveSlowFar: Int = 0     // >6 km/h VE duraktan >400 m (ardışık 6 fix = ~30 sn, yavaş trafik)
+    private var lastFixForSpeed: Location? = null
+
+    // Araçta: tek yönlü durak ilerlemesi (GPS zıplamasına dayanıklı)
+    private var maxStopIdx: Int = -1
 
     // Legacy Tek Durak Modu Değişkenleri
     private var destinationLat: Double = 0.0
@@ -73,7 +82,6 @@ class JourneyService : Service(), LocationListener {
         const val ACTION_START = "com.taha.goit.action.START_JOURNEY"
         const val ACTION_START_JOURNEY = "com.taha.goit.action.START_JOURNEY_STAGED"
         const val ACTION_STOP = "com.taha.goit.action.STOP_JOURNEY"
-        const val ACTION_ADVANCE = "com.taha.goit.action.ADVANCE_JOURNEY"
         const val EXTRA_PAYLOAD = "journeyPayload"
 
         /** Legacy iniş alarmı: Duraklar sekmesinden çağrılır */
@@ -91,7 +99,7 @@ class JourneyService : Service(), LocationListener {
             }
         }
 
-        /** V2 Aşamalı Yolculuk Başlatıcı */
+        /** V3 Aşamalı Yolculuk Başlatıcı (tam otomatik) */
         fun startJourney(context: Context, payloadJson: String) {
             val intent = Intent(context, JourneyService::class.java).apply {
                 action = ACTION_START_JOURNEY
@@ -102,14 +110,6 @@ class JourneyService : Service(), LocationListener {
             } else {
                 context.startService(intent)
             }
-        }
-
-        /** Kullanıcı "Bindim ▶" dediğinde bir sonraki aşamaya (ride) geçirir */
-        fun advance(context: Context) {
-            val intent = Intent(context, JourneyService::class.java).apply {
-                action = ACTION_ADVANCE
-            }
-            context.startService(intent)
         }
 
         fun stop(context: Context) {
@@ -136,28 +136,13 @@ class JourneyService : Service(), LocationListener {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            ACTION_ADVANCE -> {
-                if (isStagedMode && stageIndex < stages.size && stages[stageIndex].type == "wait") {
-                    advanceStage("Araca bindin")
-                }
-                return START_STICKY
-            }
             ACTION_START_JOURNEY -> {
                 val jsonStr = intent.getStringExtra(EXTRA_PAYLOAD)
                 if (!jsonStr.isNullOrBlank()) {
                     try {
                         val parsed = json.decodeFromString<JourneyPayload>(jsonStr)
                         if (parsed.stages.isNotEmpty()) {
-                            isStagedMode = true
-                            payload = parsed
-                            stages = parsed.stages
-                            stageIndex = 0
-                            initialWalkDistance = null
-                            hasAlertedCurrentStage = false
-                            hasWarnedTwoStops = false
-                            consecutiveSpeedTriggers = 0
-                            currentWaitEta = null
-                            startStagedTracking()
+                            enterStagedMode(parsed)
                             return START_STICKY
                         }
                     } catch (_: Exception) {
@@ -181,16 +166,7 @@ class JourneyService : Service(), LocationListener {
             try {
                 val parsed = json.decodeFromString<JourneyPayload>(jsonStr)
                 if (parsed.stages.isNotEmpty()) {
-                    isStagedMode = true
-                    payload = parsed
-                    stages = parsed.stages
-                    stageIndex = 0
-                    initialWalkDistance = null
-                    hasAlertedCurrentStage = false
-                    hasWarnedTwoStops = false
-                    consecutiveSpeedTriggers = 0
-                    currentWaitEta = null
-                    startStagedTracking()
+                    enterStagedMode(parsed)
                     return START_STICKY
                 }
             } catch (_: Exception) {
@@ -198,6 +174,26 @@ class JourneyService : Service(), LocationListener {
         }
 
         return START_STICKY
+    }
+
+    private fun enterStagedMode(parsed: JourneyPayload) {
+        isStagedMode = true
+        payload = parsed
+        stages = parsed.stages
+        stageIndex = 0
+        resetStageCounters()
+        startStagedTracking()
+    }
+
+    /** Aşama geçişlerinde sıfırlanan tüm sayaçlar. */
+    private fun resetStageCounters() {
+        initialWalkDistance = null
+        hasAlertedCurrentStage = false
+        hasWarnedApproaching = false
+        consecutiveFastFar = 0
+        consecutiveSlowFar = 0
+        maxStopIdx = -1
+        currentWaitEta = null
     }
 
     private fun startForegroundCompat(notification: android.app.Notification) {
@@ -211,7 +207,7 @@ class JourneyService : Service(), LocationListener {
     private fun startStagedTracking() {
         val initialStage = stages.getOrNull(0)
         val notifText = initialStage?.title ?: "Yolculuk başladı"
-        startForegroundCompat(buildNotification(notifText, isAlert = false, isWait = initialStage?.type == "wait"))
+        startForegroundCompat(buildNotification(notifText, isAlert = false))
 
         if (initialStage != null) {
             JourneyTracker.state.value = JourneyTracker.RuntimeState(
@@ -229,7 +225,7 @@ class JourneyService : Service(), LocationListener {
     }
 
     private fun startLegacyTracking() {
-        startForegroundCompat(buildNotification("Yolculuk başladı • Hedef: $destinationName", isAlert = false, isWait = false))
+        startForegroundCompat(buildNotification("Yolculuk başladı • Hedef: $destinationName", isAlert = false))
         JourneyTracker.state.value = JourneyTracker.RuntimeState(
             stageIndex = 0,
             stageType = "ride",
@@ -254,28 +250,23 @@ class JourneyService : Service(), LocationListener {
                         etas
                     }
                     val best = matched.minByOrNull { parseEtaSeconds(it.realTime ?: it.passTime) }
-                    val etaStr = best?.let { formatEtaTime(it.realTime ?: it.passTime) }
-                    currentWaitEta = etaStr
+                    currentWaitEta = best?.let { formatEtaTime(it.realTime ?: it.passTime) }
 
-                    val detail = buildString {
-                        append("🚏 ")
-                        append(stage.targetName)
-                        if (!etaStr.isNullOrBlank() && etaStr != "-") {
-                            append(" • ~$etaStr")
-                        }
+                    val route = stage.routeCode ?: "Otobüs"
+                    val etaPart = if (!currentWaitEta.isNullOrBlank() && currentWaitEta != "-") {
+                        "$route hattı ~$currentWaitEta içinde geliyor"
+                    } else {
+                        "$route hattı bekleniyor"
                     }
+                    val detail = "🚏 ${stage.targetName} • $etaPart"
                     JourneyTracker.state.value = JourneyTracker.RuntimeState(
                         stageIndex = stageIndex,
                         stageType = "wait",
-                        title = stage.title.ifEmpty { "${stage.routeCode ?: "Otobüs"} hattını bekle" },
+                        title = stage.title.ifEmpty { "$route hattını bekle" },
                         detail = detail,
                         progress = 0f
                     )
-                    updateNotification(
-                        text = "${stage.title} • $detail",
-                        isAlert = false,
-                        isWait = true
-                    )
+                    updateNotification("$etaPart • 🚏 ${stage.targetName}", isAlert = false)
                 } catch (_: Exception) {
                 }
                 delay(20_000L)
@@ -285,13 +276,9 @@ class JourneyService : Service(), LocationListener {
 
     private fun advanceStage(reason: String? = null) {
         stageIndex++
-        initialWalkDistance = null
-        hasAlertedCurrentStage = false
-        hasWarnedTwoStops = false
-        consecutiveSpeedTriggers = 0
+        resetStageCounters()
         waitEtaJob?.cancel()
         waitEtaJob = null
-        currentWaitEta = null
 
         if (stageIndex >= stages.size) {
             val destName = payload?.destinationName ?: destinationName.ifEmpty { "Hedef" }
@@ -302,8 +289,8 @@ class JourneyService : Service(), LocationListener {
                 detail = destName,
                 progress = 1f
             )
-            sendArrivalAlert("Hedefe ulaştın! 🎉 • $destName")
-            updateNotification("Hedefe ulaştın! 🎉 • $destName", isAlert = true, isWait = false)
+            sendArrivalAlert("İndin! Hedefe ulaştın 🎉 • $destName")
+            updateNotification("İndin! Hedefe ulaştın 🎉 • $destName", isAlert = true)
             serviceScope.launch {
                 delay(60_000L)
                 stopTracking()
@@ -327,7 +314,7 @@ class JourneyService : Service(), LocationListener {
                 detail = nextStage.targetName,
                 progress = 0f
             )
-            updateNotification(nextStage.title, isAlert = false, isWait = nextStage.type == "wait")
+            updateNotification(nextStage.title, isAlert = false)
         }
     }
 
@@ -345,7 +332,7 @@ class JourneyService : Service(), LocationListener {
                 lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5000L, 10f, this)
             }
         } catch (_: SecurityException) {
-            updateNotification("Konum izni olmadan takip edilemiyor.", isAlert = false, isWait = false)
+            updateNotification("Konum izni olmadan takip edilemiyor.", isAlert = false)
         } catch (_: Exception) {
         }
     }
@@ -357,6 +344,26 @@ class JourneyService : Service(), LocationListener {
         }
         waitEtaJob?.cancel()
         waitEtaJob = null
+    }
+
+    /** GPS raporlu hız ile ardışık fix'lerden hesaplanan hızın büyüğü (km/h). */
+    private fun speedKmh(location: Location): Float {
+        val reported = if (location.hasSpeed()) location.speed * 3.6f else 0f
+        var computed = 0f
+        val last = lastFixForSpeed
+        if (last != null) {
+            val dt = (location.time - last.time) / 1000f
+            if (dt in 1f..120f) {
+                val res = FloatArray(1)
+                Location.distanceBetween(
+                    last.latitude, last.longitude,
+                    location.latitude, location.longitude, res
+                )
+                computed = (res[0] / dt) * 3.6f
+            }
+        }
+        lastFixForSpeed = location
+        return maxOf(reported, computed)
     }
 
     override fun onLocationChanged(location: Location) {
@@ -377,14 +384,13 @@ class JourneyService : Service(), LocationListener {
                     sendArrivalAlert("İniş zamanı! $destinationName durağındasınız.")
                 }
                 hasAlerted -> {
-                    updateNotification("İniş zamanı! $destinationName durağına hoş geldiniz.", true, isWait = false)
+                    updateNotification("İniş zamanı! $destinationName durağına hoş geldiniz.", true)
                 }
                 else -> {
                     val etaMin = (distanceMeters / 1000.0 / 22.0 * 60.0).roundToInt()
                     updateNotification(
                         "Hedefe ${distanceMeters.roundToInt()} m kaldı (~$etaMin dk) • $destinationName",
-                        false,
-                        isWait = false
+                        false
                     )
                 }
             }
@@ -427,7 +433,7 @@ class JourneyService : Service(), LocationListener {
                     distanceToNextMeters = dist,
                     progress = progress
                 )
-                updateNotification("${currentStage.title} • $detail", isAlert = false, isWait = false)
+                updateNotification("${currentStage.title} • $detail", isAlert = false)
 
                 if (dist <= 60.0) {
                     advanceStage("🚏 Durağa ulaştın")
@@ -441,32 +447,32 @@ class JourneyService : Service(), LocationListener {
                     currentStage.targetLat, currentStage.targetLng, results
                 )
                 val distFromStop = results[0]
-                val speedKmh = if (location.hasSpeed()) (location.speed * 3.6f) else 0f
+                val spd = speedKmh(location)
 
-                val detail = buildString {
-                    append("🚏 ")
-                    append(currentStage.targetName)
-                    if (!currentWaitEta.isNullOrBlank() && currentWaitEta != "-") {
-                        append(" • ~$currentWaitEta")
-                    }
+                val route = currentStage.routeCode ?: "Otobüs"
+                val etaPart = if (!currentWaitEta.isNullOrBlank() && currentWaitEta != "-") {
+                    "$route hattı ~$currentWaitEta içinde geliyor"
+                } else {
+                    "$route hattı bekleniyor"
                 }
+                val detail = "🚏 ${currentStage.targetName} • $etaPart"
                 JourneyTracker.state.value = JourneyTracker.RuntimeState(
                     stageIndex = stageIndex,
                     stageType = "wait",
-                    title = currentStage.title.ifEmpty { "${currentStage.routeCode ?: "Otobüs"} hattını bekle" },
+                    title = currentStage.title.ifEmpty { "$route hattını bekle" },
                     detail = detail,
                     progress = 0f
                 )
-                updateNotification("${currentStage.title} • $detail", isAlert = false, isWait = true)
+                updateNotification("$etaPart • 🚏 ${currentStage.targetName}", isAlert = false)
 
-                // Otomatik ilerleme: hız > 8 km/h VE duraktan > 150 m uzaklaşma (10 sn = 2 kontrol)
-                if (speedKmh > 8f && distFromStop > 150f) {
-                    consecutiveSpeedTriggers++
-                    if (consecutiveSpeedTriggers >= 2) {
-                        advanceStage("Otobüs hareket etti")
-                    }
-                } else {
-                    consecutiveSpeedTriggers = 0
+                // Otomatik biniş algılama (Moovit tarzı, kullanıcı onayı yok):
+                // 1) Hızlı hareket: >12 km/h VE duraktan >150 m uzakta — ardışık 2 fix (~10 sn)
+                // 2) Yavaş trafik fallback: >6 km/h VE duraktan >400 m uzakta — ardışık 6 fix (~30 sn)
+                if (spd > 12f && distFromStop > 150f) consecutiveFastFar++ else consecutiveFastFar = 0
+                if (spd > 6f && distFromStop > 400f) consecutiveSlowFar++ else consecutiveSlowFar = 0
+
+                if (consecutiveFastFar >= 2 || consecutiveSlowFar >= 6) {
+                    advanceStage("Araca bindin")
                 }
             }
 
@@ -482,8 +488,11 @@ class JourneyService : Service(), LocationListener {
                         nearestIdx = idx
                     }
                 }
+                // Tek yönlü sayaç: GPS zıplamasında geriye düşmez, yalnızca ilerler
+                val effectiveIdx = maxOf(maxStopIdx, nearestIdx)
+                maxStopIdx = effectiveIdx
                 val stopsRemaining = if (currentStage.stops.isNotEmpty()) {
-                    (currentStage.stops.size - 1 - nearestIdx).coerceAtLeast(0)
+                    (currentStage.stops.size - 1 - effectiveIdx).coerceAtLeast(0)
                 } else 0
 
                 val resAlight = FloatArray(1)
@@ -493,34 +502,40 @@ class JourneyService : Service(), LocationListener {
                 )
                 val distToAlight = resAlight[0].toDouble()
 
-                val nextStopName = currentStage.stops.getOrNull(nearestIdx + 1)?.name ?: currentStage.targetName
+                val nextStopName = currentStage.stops.getOrNull(
+                    (effectiveIdx + 1).coerceAtMost(currentStage.stops.size - 1)
+                )?.name ?: currentStage.targetName
+                val route = currentStage.routeCode ?: "Otobüs"
                 val detail = "Sıradaki: $nextStopName • $stopsRemaining durak kaldı"
                 val progress = if (currentStage.stops.size > 1) {
-                    (nearestIdx.toFloat() / (currentStage.stops.size - 1)).coerceIn(0f, 1f)
+                    (effectiveIdx.toFloat() / (currentStage.stops.size - 1)).coerceIn(0f, 1f)
                 } else 0f
 
                 JourneyTracker.state.value = JourneyTracker.RuntimeState(
                     stageIndex = stageIndex,
                     stageType = "ride",
-                    title = currentStage.title.ifEmpty { "${currentStage.routeCode ?: "Otobüs"} ile git" },
+                    title = currentStage.title.ifEmpty { "$route ile git" },
                     detail = detail,
                     stopsRemaining = stopsRemaining,
                     distanceToNextMeters = distToAlight,
                     progress = progress
                 )
-                updateNotification("${currentStage.title} • $detail", isAlert = false, isWait = false)
+                updateNotification("$route • $detail", isAlert = false)
 
-                if (stopsRemaining == 2 && !hasWarnedTwoStops) {
-                    hasWarnedTwoStops = true
-                    updateNotification("2 durak kaldı • ${currentStage.targetName}", isAlert = false, isWait = false)
+                // "Yaklaşıyorsun" erken uyarısı (Moovit: Arriving soon)
+                if (stopsRemaining == 2 && !hasWarnedApproaching) {
+                    hasWarnedApproaching = true
+                    updateNotification("Yaklaşıyorsun • 2 durak kaldı • ${currentStage.targetName}", isAlert = false)
                 }
 
-                if ((distToAlight <= 250.0 || stopsRemaining <= 1) && !hasAlertedCurrentStage) {
+                // "Hazır ol!" iniş alarmı (Moovit: Get ready) — titreşimli
+                if ((stopsRemaining <= 1 || distToAlight <= 250.0) && !hasAlertedCurrentStage) {
                     hasAlertedCurrentStage = true
-                    sendArrivalAlert("İn! Sıradaki durak: ${currentStage.targetName}")
+                    sendArrivalAlert("Hazır ol! Sıradaki durak iniş durağın • ${currentStage.targetName}")
                 }
 
-                if (distToAlight <= 100.0 || (currentStage.stops.isNotEmpty() && nearestIdx >= currentStage.stops.size - 1 && distToAlight <= 150.0)) {
+                // Otomatik iniş: iniş durağına ≤100 m (veya son durak + ≤150 m)
+                if (distToAlight <= 100.0 || (currentStage.stops.isNotEmpty() && effectiveIdx >= currentStage.stops.size - 1 && distToAlight <= 150.0)) {
                     advanceStage("İndin: ${currentStage.targetName}")
                 }
             }
@@ -546,15 +561,15 @@ class JourneyService : Service(), LocationListener {
 
         val alert = buildAlert(alertText)
         nm.notify(ALERT_NOTIFICATION_ID, alert)
-        updateNotification(alertText, isAlert = true, isWait = false)
+        updateNotification(alertText, isAlert = true)
     }
 
-    private fun updateNotification(text: String, isAlert: Boolean, isWait: Boolean = false) {
+    private fun updateNotification(text: String, isAlert: Boolean) {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIFICATION_ID, buildNotification(text, isAlert, isWait))
+        nm.notify(NOTIFICATION_ID, buildNotification(text, isAlert))
     }
 
-    private fun buildNotification(text: String, isAlert: Boolean, isWait: Boolean = false): android.app.Notification {
+    private fun buildNotification(text: String, isAlert: Boolean): android.app.Notification {
         val contentIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
@@ -568,23 +583,13 @@ class JourneyService : Service(), LocationListener {
 
         val builder = NotificationCompat.Builder(this, if (isAlert) ALERT_CHANNEL_ID else CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_map)
-            .setContentTitle(if (isAlert) "GoIt İniş Uyarısı!" else "GoIt Yolculuk Asistanı")
+            .setContentTitle(if (isAlert) "GoIt İniş Uyarısı!" else "GoIt Canlı Yolculuk")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setOngoing(!isAlert)
             .setContentIntent(contentIntent)
             .setPriority(if (isAlert) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
-
-        if (isWait) {
-            val advanceIntent = PendingIntent.getService(
-                this, 2,
-                Intent(this, JourneyService::class.java).apply { action = ACTION_ADVANCE },
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            builder.addAction(0, "Bindim ▶", advanceIntent)
-        }
-
-        builder.addAction(0, "Yolculuğu Bitir", stopIntent)
+            .addAction(0, "Yolculuğu Bitir", stopIntent)
         return builder.build()
     }
 
