@@ -1080,6 +1080,9 @@ private fun StopsTab(
         }
 
         val favStops = uiState.favorites.filter { it.type == "S" }
+        val nearestStationId = remember(uiState.nearbyStops) {
+            uiState.nearbyStops.firstOrNull()?.takeIf { it.distanceMeters <= NEAR_STOP_METERS }?.station?.i
+        }
 
         if (uiState.nearbyStops.isEmpty() && favStops.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1116,9 +1119,6 @@ private fun StopsTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                     )
-                }
-                val nearestStationId = remember(uiState.nearbyStops) {
-                    uiState.nearbyStops.firstOrNull()?.takeIf { it.distanceMeters <= NEAR_STOP_METERS }?.station?.i
                 }
                 items(uiState.nearbyStops) { row ->
                     NearbyStopRow(
@@ -1501,6 +1501,20 @@ private fun RouteDetailScreen(
             }
         )
 
+        val filtered = remember(uiState.selectedRouteStops, uiState.selectedDirection) {
+            uiState.selectedRouteStops
+                .filter { it.direction == uiState.selectedDirection || it.direction == null }
+                .sortedBy { it.sequence }
+        }
+        val nearestStopId = remember(filtered, uiState.userLat, uiState.userLng) {
+            val uLat = uiState.userLat; val uLng = uiState.userLng
+            if (uLat == null || uLng == null) null
+            else filtered.mapNotNull { s ->
+                val la = s.latitude?.toDoubleOrNull(); val lo = s.longitude?.toDoubleOrNull()
+                if (la != null && lo != null) s.stopId to com.taha.goit.data.api.TransitRepository.calculateDistanceMeters(uLat, uLng, la, lo) else null
+            }.minByOrNull { it.second }?.takeIf { it.second <= NEAR_STOP_METERS }?.first
+        }
+
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             item {
                 Row(
@@ -1548,17 +1562,6 @@ private fun RouteDetailScreen(
             }
 
             item { SectionHeader("Duraklar") }
-            val filtered = uiState.selectedRouteStops
-                .filter { it.direction == uiState.selectedDirection || it.direction == null }
-                .sortedBy { it.sequence }
-            val nearestStopId = remember(filtered, uiState.userLat, uiState.userLng) {
-                val uLat = uiState.userLat; val uLng = uiState.userLng
-                if (uLat == null || uLng == null) null
-                else filtered.mapNotNull { s ->
-                    val la = s.latitude?.toDoubleOrNull(); val lo = s.longitude?.toDoubleOrNull()
-                    if (la != null && lo != null) s.stopId to com.taha.goit.data.api.TransitRepository.calculateDistanceMeters(uLat, uLng, la, lo) else null
-                }.minByOrNull { it.second }?.takeIf { it.second <= NEAR_STOP_METERS }?.first
-            }
             itemsIndexed(filtered) { idx, stop ->
                 RouteStopRow(
                     index = idx + 1,
