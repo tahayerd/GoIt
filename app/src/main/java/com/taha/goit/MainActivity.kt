@@ -61,13 +61,14 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null) return
-        val action = intent.action
-        if (action != Intent.ACTION_VIEW) return
-        val uri = intent.data ?: return
-        val uriString = uri.toString()
+        val rawText = when (intent.action) {
+            Intent.ACTION_VIEW -> intent.data?.toString()
+            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT) ?: intent.clipData?.getItemAt(0)?.text?.toString()
+            else -> null
+        } ?: return
 
         lifecycleScope.launch {
-            val parsed = MapsLinkParser.parse(uriString)
+            val parsed = MapsLinkParser.parse(rawText)
             if (parsed != null) {
                 viewModel.setDestinationFromExternal(parsed.lat, parsed.lng, parsed.label)
             }
