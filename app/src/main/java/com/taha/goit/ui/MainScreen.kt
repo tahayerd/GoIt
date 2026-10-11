@@ -1,5 +1,6 @@
 package com.taha.goit.ui
 
+import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -57,6 +58,8 @@ fun MainScreen(
     viewModel: MainViewModel,
     favoritesManager: FavoritesManager,
     historyManager: RouteHistoryManager,
+    onRequestLocationPermission: () -> Unit = {},
+    onRequestNotificationPermission: () -> Unit = {},
     onStartJourney: (Double, Double, String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -64,6 +67,11 @@ fun MainScreen(
     val scope = rememberCoroutineScope()
     val darkTheme = isSystemInDarkTheme()
     val styleUrl = if (darkTheme) STYLE_DARK else STYLE_LIGHT
+
+    val prefs = remember { context.getSharedPreferences("goit_prefs", Context.MODE_PRIVATE) }
+    var showOnboarding by rememberSaveable {
+        mutableStateOf(!prefs.getBoolean("onboarding_done_v1", false))
+    }
 
     var selectedTab by rememberSaveable { mutableStateOf(0) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
@@ -321,6 +329,17 @@ fun MainScreen(
             uiState = uiState,
             viewModel = viewModel,
             onDismiss = { showSettings = false }
+        )
+    }
+
+    if (showOnboarding) {
+        OnboardingScreen(
+            onRequestLocationPermission = onRequestLocationPermission,
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            onComplete = {
+                prefs.edit().putBoolean("onboarding_done_v1", true).apply()
+                showOnboarding = false
+            }
         )
     }
 }

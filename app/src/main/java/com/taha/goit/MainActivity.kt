@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
+import com.taha.goit.location.LocationHelper
 import com.taha.goit.service.JourneyService
 import com.taha.goit.ui.MainScreen
 import com.taha.goit.ui.MainViewModel
@@ -19,22 +20,23 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
-    private val permissionLauncher = registerForActivityResult(
+    private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        if (LocationHelper.hasPermission(this)) {
+            lifecycleScope.launch {
+                val loc = LocationHelper.getFreshLocation(this@MainActivity)
+                if (loc != null) viewModel.loadNearby(loc.latitude, loc.longitude)
+            }
+        }
+    }
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
     ) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Konum ve bildirim izinlerini iste
-        val permissions = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        permissionLauncher.launch(permissions.toTypedArray())
 
         // Dışarıdan gelen Google Maps Intent'ini işle
         handleIncomingIntent(intent)
@@ -50,6 +52,19 @@ class MainActivity : ComponentActivity() {
                     viewModel = viewModel,
                     favoritesManager = (application as GoItApp).favoritesManager,
                     historyManager = (application as GoItApp).historyManager,
+                    onRequestLocationPermission = {
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    },
+                    onRequestNotificationPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    },
                     onStartJourney = { lat, lng, name ->
                         JourneyService.start(this, lat, lng, name)
                     }
