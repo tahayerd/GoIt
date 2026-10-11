@@ -12,8 +12,8 @@ android {
         applicationId = "com.taha.goit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -66,7 +66,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
     // MapLibre Native for Android (FOSS Maps - No Google Play Services trackers)
-    implementation("org.maplibre.gl:android-sdk:11.0.1")
+    // 11.13.5: 16 KB page-size uyumlu native kütüphaneler (arm64/x86_64 LOAD align 0x4000)
+    implementation("org.maplibre.gl:android-sdk:11.13.5")
 
     // Minimal Networking (OkHttp + Kotlin Serialization)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
