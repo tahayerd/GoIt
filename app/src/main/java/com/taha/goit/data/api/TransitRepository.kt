@@ -1,6 +1,7 @@
 package com.taha.goit.data.api
 
 import com.taha.goit.data.local.StationDatabase
+import com.taha.goit.data.model.LocalStation
 import com.taha.goit.data.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -284,7 +285,9 @@ class TransitRepository {
     ): List<RoutePlan> = withContext(Dispatchers.IO) {
         try {
             val originCandidates = StationDatabase.walkCandidates(originLat, originLng)
+                .map { StopCandidate(it.first, it.second) }
             val destCandidates = StationDatabase.walkCandidates(destLat, destLng)
+                .map { StopCandidate(it.first, it.second) }
 
             val directPlans = mutableListOf<RoutePlan>()
             val transferPlans = mutableListOf<RoutePlan>()
@@ -458,8 +461,8 @@ class TransitRepository {
         originLng: Double,
         destLat: Double,
         destLng: Double,
-        originCandidates: List<Pair<LocalStation, Double>>,
-        destCandidates: List<Pair<LocalStation, Double>>,
+        originCandidates: List<StopCandidate>,
+        destCandidates: List<StopCandidate>,
         excludeRouteCodes: Set<String>
     ): List<RoutePlan> {
         val result = mutableListOf<RoutePlan>()
@@ -563,7 +566,7 @@ class TransitRepository {
                             val alight = sLeg[j]
                             val alightId = alight.stopId ?: continue
                             // Bu durak bir varış adayına yürüme mesafesinde mi?
-                            var walkFromCandidate: Pair<LocalStation, Double>? = null
+                            var walkFromCandidate: StopCandidate? = null
                             if (destStopIds.contains(alightId)) {
                                 walkFromCandidate = destStopById[alightId]
                             } else {
