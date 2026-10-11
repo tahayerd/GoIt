@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
         val app = application as GoItApp
         viewModel.setPlacesManager(app.savedPlacesManager)
         viewModel.setJourneyHistoryManager(app.journeyHistoryManager)
+        viewModel.setSettingsManager(app.settingsManager)
 
         setContent {
             GoItTheme {

@@ -5,6 +5,7 @@ import com.taha.goit.data.local.FavoritesManager
 import com.taha.goit.data.local.JourneyHistoryManager
 import com.taha.goit.data.local.RouteHistoryManager
 import com.taha.goit.data.local.SavedPlacesManager
+import com.taha.goit.data.local.SettingsManager
 import org.maplibre.android.MapLibre
 
 class GoItApp : Application() {
@@ -16,6 +17,8 @@ class GoItApp : Application() {
         private set
     lateinit var journeyHistoryManager: JourneyHistoryManager
         private set
+    lateinit var settingsManager: SettingsManager
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -24,5 +27,6 @@ class GoItApp : Application() {
         historyManager = RouteHistoryManager(this)
         savedPlacesManager = SavedPlacesManager(this)
         journeyHistoryManager = JourneyHistoryManager(this)
+        settingsManager = SettingsManager(this)
     }
 }

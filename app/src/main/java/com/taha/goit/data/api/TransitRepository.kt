@@ -281,12 +281,14 @@ class TransitRepository {
         originLat: Double,
         originLng: Double,
         destLat: Double,
-        destLng: Double
+        destLng: Double,
+        maxAccess: Double = 800.0,
+        maxTransferWalk: Double = MAX_TRANSFER_WALK_M
     ): List<RoutePlan> = withContext(Dispatchers.IO) {
         try {
-            val originCandidates = StationDatabase.walkCandidates(originLat, originLng)
+            val originCandidates = StationDatabase.walkCandidates(originLat, originLng, maxAccess)
                 .map { StopCandidate(it.first, it.second) }
-            val destCandidates = StationDatabase.walkCandidates(destLat, destLng)
+            val destCandidates = StationDatabase.walkCandidates(destLat, destLng, maxAccess)
                 .map { StopCandidate(it.first, it.second) }
 
             val directPlans = mutableListOf<RoutePlan>()
@@ -326,7 +328,8 @@ class TransitRepository {
                 destLng = destLng,
                 originCandidates = originCandidates,
                 destCandidates = destCandidates,
-                excludeRouteCodes = bestDirect.map { it.routeCode }.toSet()
+                excludeRouteCodes = bestDirect.map { it.routeCode }.toSet(),
+                maxTransferWalk = maxTransferWalk
             )
 
             val bestTransfer = transferResults
@@ -463,7 +466,8 @@ class TransitRepository {
         destLng: Double,
         originCandidates: List<StopCandidate>,
         destCandidates: List<StopCandidate>,
-        excludeRouteCodes: Set<String>
+        excludeRouteCodes: Set<String>,
+        maxTransferWalk: Double = MAX_TRANSFER_WALK_M
     ): List<RoutePlan> {
         val result = mutableListOf<RoutePlan>()
         val destStopIds = destCandidates.map { it.stop.i }.toSet()
@@ -577,7 +581,7 @@ class TransitRepository {
                                         alight.longitude?.toDoubleOrNull() ?: continue,
                                         d.stop.la, d.stop.lo
                                     )
-                                    if (dist <= MAX_TRANSFER_WALK_M) {
+                                    if (dist <= maxTransferWalk) {
                                         walkFromCandidate = d
                                         break
                                     }

@@ -12,6 +12,7 @@ import com.taha.goit.data.local.JourneyHistoryEntry
 import com.taha.goit.data.local.JourneyHistoryManager
 import com.taha.goit.data.local.SavedPlace
 import com.taha.goit.data.local.SavedPlacesManager
+import com.taha.goit.data.local.SettingsManager
 import com.taha.goit.data.local.StationDatabase
 import com.taha.goit.data.model.*
 import com.taha.goit.util.MapsLinkParser
@@ -116,7 +117,11 @@ data class MainUiState(
     val savedPlaces: List<SavedPlace> = emptyList(),
     val journeyHistory: List<JourneyHistoryEntry> = emptyList(),
     // Rota sıralama seçeneği ("onerilen" | "hizli" | "azyurume" | "azaktarma")
-    val planSort: String = "onerilen"
+    val planSort: String = "onerilen",
+    // Ayarlar (Yürüme limitleri & bildirimler)
+    val walkAccessMeters: Int = 800,
+    val walkTransferMeters: Int = 400,
+    val favoriteAlertsEnabled: Boolean = false
 )
 
 class MainViewModel : ViewModel() {
@@ -127,6 +132,7 @@ class MainViewModel : ViewModel() {
     private var historyManager: RouteHistoryManager? = null
     private var savedPlacesManager: SavedPlacesManager? = null
     private var journeyHistoryManager: JourneyHistoryManager? = null
+    private var settingsManager: SettingsManager? = null
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -157,6 +163,34 @@ class MainViewModel : ViewModel() {
     fun setJourneyHistoryManager(manager: JourneyHistoryManager) {
         journeyHistoryManager = manager
         _uiState.value = _uiState.value.copy(journeyHistory = manager.getHistory())
+    }
+
+    fun setSettingsManager(manager: SettingsManager) {
+        settingsManager = manager
+        _uiState.value = _uiState.value.copy(
+            walkAccessMeters = manager.walkAccessMeters,
+            walkTransferMeters = manager.walkTransferMeters,
+            favoriteAlertsEnabled = manager.favoriteAlertsEnabled
+        )
+    }
+
+    fun updateWalkAccess(meters: Int) {
+        settingsManager?.walkAccessMeters = meters
+        _uiState.value = _uiState.value.copy(walkAccessMeters = meters)
+    }
+
+    fun updateWalkTransfer(meters: Int) {
+        settingsManager?.walkTransferMeters = meters
+        _uiState.value = _uiState.value.copy(walkTransferMeters = meters)
+    }
+
+    fun toggleFavoriteAlerts(enabled: Boolean) {
+        settingsManager?.favoriteAlertsEnabled = enabled
+        _uiState.value = _uiState.value.copy(favoriteAlertsEnabled = enabled)
+    }
+
+    fun resetOnboarding() {
+        settingsManager?.resetOnboarding()
     }
 
     fun refreshSavedPlaces() {
@@ -606,7 +640,9 @@ class MainViewModel : ViewModel() {
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isTripPlanning = true, selectedPlan = null, errorMessage = null)
-            val transitPlans = repository.planTrip(o.lat, o.lng, d.lat, d.lng)
+            val access = _uiState.value.walkAccessMeters.toDouble()
+            val transfer = _uiState.value.walkTransferMeters.toDouble()
+            val transitPlans = repository.planTrip(o.lat, o.lng, d.lat, d.lng, maxAccess = access, maxTransferWalk = transfer)
 
             // "Sadece yürü" alternatifi (≤2 km)
             val finalPlans = if (distance <= 2000.0) {

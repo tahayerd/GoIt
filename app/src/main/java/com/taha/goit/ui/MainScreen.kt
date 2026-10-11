@@ -66,6 +66,7 @@ fun MainScreen(
     val styleUrl = if (darkTheme) STYLE_DARK else STYLE_LIGHT
 
     var selectedTab by rememberSaveable { mutableStateOf(0) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     var mapLayers by remember { mutableStateOf<MapLayers?>(null) }
     var mapEpoch by remember { mutableIntStateOf(0) }
     var mapView by remember { mutableStateOf<MapView?>(null) }
@@ -170,7 +171,8 @@ fun MainScreen(
                     uiState = uiState,
                     viewModel = viewModel,
                     favoritesManager = favoritesManager,
-                    onStartJourney = onStartJourney
+                    onStartJourney = onStartJourney,
+                    onOpenSettings = { showSettings = true }
                 )
                 1 -> Box(
                     modifier = Modifier
@@ -182,6 +184,7 @@ fun MainScreen(
                         viewModel = viewModel,
                         favoritesManager = favoritesManager,
                         onStartJourney = onStartJourney,
+                        onOpenSettings = { showSettings = true },
                         onLocate = {
                             scope.launch {
                                 val loc = LocationHelper.getFreshLocation(context)
@@ -200,6 +203,7 @@ fun MainScreen(
                         viewModel = viewModel,
                         favoritesManager = favoritesManager,
                         onStartJourney = onStartJourney,
+                        onOpenSettings = { showSettings = true },
                         onStop = { viewModel.selectStop(it) }
                     )
                 }
@@ -311,6 +315,14 @@ fun MainScreen(
             }
         }
     }
+
+    if (showSettings) {
+        SettingsScreen(
+            uiState = uiState,
+            viewModel = viewModel,
+            onDismiss = { showSettings = false }
+        )
+    }
 }
 
 // =========================================================
@@ -322,12 +334,14 @@ private fun TripTab(
     uiState: MainUiState,
     viewModel: MainViewModel,
     favoritesManager: FavoritesManager,
-    onStartJourney: (Double, Double, String) -> Unit
+    onStartJourney: (Double, Double, String) -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         TripSearchCard(
             uiState = uiState,
             viewModel = viewModel,
+            onOpenSettings = onOpenSettings,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(10.dp)
@@ -346,6 +360,7 @@ private fun TripTab(
 private fun TripSearchCard(
     uiState: MainUiState,
     viewModel: MainViewModel,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var placeToSave by remember { mutableStateOf<PlaceResult?>(null) }
@@ -453,8 +468,13 @@ private fun TripSearchCard(
                     } else {
                         Spacer(Modifier.width(1.dp))
                     }
-                    IconButton(onClick = { viewModel.swapTripPoints() }) {
-                        Icon(Icons.Default.SwapVert, "Değiştir", tint = MaterialTheme.colorScheme.primary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Default.Settings, "Ayarlar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = { viewModel.swapTripPoints() }) {
+                            Icon(Icons.Default.SwapVert, "Değiştir", tint = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
                 TripPointRow(
@@ -1382,6 +1402,7 @@ private fun StopsTab(
     viewModel: MainViewModel,
     favoritesManager: FavoritesManager,
     onStartJourney: (Double, Double, String) -> Unit,
+    onOpenSettings: () -> Unit,
     onLocate: () -> Unit
 ) {
     if (uiState.selectedStop != null) {
@@ -1416,6 +1437,7 @@ private fun StopsTab(
             onBack = null,
             actions = {
                 IconButton(onClick = onLocate) { Icon(Icons.Default.MyLocation, "Konumumu bul") }
+                IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Ayarlar") }
             }
         )
 
@@ -1589,6 +1611,7 @@ private fun RoutesTab(
     viewModel: MainViewModel,
     favoritesManager: FavoritesManager,
     onStartJourney: (Double, Double, String) -> Unit,
+    onOpenSettings: () -> Unit,
     onStop: (RouteStop) -> Unit
 ) {
     // Durak detayı (Hat içinden durağa tıklanınca)
@@ -1624,7 +1647,13 @@ private fun RoutesTab(
     var query by rememberSaveable { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TopBar(title = "Hatlar", onBack = null, actions = {})
+        TopBar(
+            title = "Hatlar",
+            onBack = null,
+            actions = {
+                IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Ayarlar") }
+            }
+        )
 
         OutlinedTextField(
             value = query,
