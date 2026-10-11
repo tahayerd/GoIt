@@ -1,22 +1,46 @@
-# GoIt Transit - Bursa (FOSS Moovit Alternative)
+# GoIt Transit — Bursa (FOSS Moovit Alternative)
 
-Reklamlardan, telemetriden ve izleyicilerden tamamen arındırılmış, hafif ve kişisel kullanıma özel Bursa toplu taşıma uygulaması.
+A lightweight, personal transit companion for Bursa. No ads, no telemetry, no trackers.
 
-## Özellikler
-- **Sıfır İzleyici / Sıfır Reklam:** Hiçbir analitik, telemetri veya reklam SDK'sı barındırmaz.
-- **Doğrudan Veri Kaynağı:** Bursa Ulaşım (Burulaş / Bursakart) doğrudan REST uç noktaları üzerinden çalışır.
-- **Canlı Otobüs Takibi:** Seçilen hattaki tüm araçların anlık GPS koordinatları, plakaları, seyir hızları ve yön bilgileri.
-- **Hat ve Durak Arama:** Anlık arama (örn. `B16A`, `Heykel`, `D8A`).
-- **Açık Kaynak Harita:** MapLibre Native Android + Carto Positron / OpenStreetMap katmanları (Google Play Services bağımlılığı yoktur).
+## Features
 
-## Mimari
+### Yol Tarifi (Trip Planner)
+- Search a place or venue by name; GoIt resolves it to the nearest stop.
+- Plans the trip from your nearest stop to the destination (same-route first, one-transfer fallback).
+- Uses a baked-in local station/POI database (13,922 records); falls back to Nominatim (OSM) for places not found locally.
+- Map shows the route line, A/B endpoints and a stop timeline with a direction toggle.
+
+### Duraklar (Stops)
+- Nearby stops sorted by distance with live approaching-bus ETAs and fare prices.
+- Stop detail: upcoming arrivals (10 s auto-refresh), full day schedule, and served lines.
+- Favorite stops and quick "start journey" from any stop.
+
+### Hatlar (Routes)
+- Full city route catalog (409 lines: bus, metro, tram) with search by code.
+- Recently used routes pinned to the top (max 15, stored locally).
+- Route detail: all stops, live vehicle positions on the map, direction chips, and fare info.
+- "Sen burdasın" badge under a stop when you are within ~150 m of it.
+
+### Live Tracking
+- Animated bus markers with bearing/rotation, plate labels and speed.
+- Journey notifications: a foreground service alerts you with vibration when you get within ~250 m of your destination.
+
+## Privacy
+- Zero analytics, ads, or tracker SDKs.
+- Data comes directly from Burulaş/Bursakart public REST endpoints.
+- The only third-party network call is Nominatim (OSM) for geocoding places missing from the local database.
+
+## Architecture
 - **Platform:** Android Native (Kotlin + Jetpack Compose)
-- **Ağ:** OkHttp + Kotlinx Serialization
-- **Asenkron Yapı:** Coroutines & StateFlow (MVVM)
+- **Maps:** MapLibre Native Android 11.13.5 + Carto Positron / Dark Matter (no Google Play Services)
+- **Networking:** OkHttp + kotlinx.serialization
+- **Async:** Coroutines & StateFlow (MVVM)
+- **Theme:** Material 3 with automatic dark mode
 
-## Derleme (Build)
-Projeyi derlemek için:
+## Building
+APKs are built in CI only. Push to `master` (or run the workflow manually) and GitHub Actions produces `app-debug.apk`, uploaded both as a workflow artifact and as the rolling `latest` release.
+
+For local compile checks (no APK):
 ```bash
-./gradlew assembleDebug
+./gradlew :app:compileDebugKotlin
 ```
-veya doğrudan Android Studio ile açıp cihazınıza yükleyebilirsiniz.
