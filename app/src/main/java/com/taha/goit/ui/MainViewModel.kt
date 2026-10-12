@@ -155,6 +155,8 @@ class MainViewModel : ViewModel() {
     private var savedPlacesManager: SavedPlacesManager? = null
     private var journeyHistoryManager: JourneyHistoryManager? = null
     private var settingsManager: SettingsManager? = null
+    private var scheduleCache: ScheduleCache? = null
+    private var osrmRouter: OsrmRouter? = null
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -223,8 +225,9 @@ class MainViewModel : ViewModel() {
         val cache = scheduleCache ?: return
         val ts = cache.getLastUpdateTimestamp()
         val text = if (ts > 0L) {
-            val sdf = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale("tr", "TR"))
-            "Son güncelleme: ${sdf.format(java.util.Date(ts))}"
+            val dt = java.time.Instant.ofEpochMilli(ts).atZone(java.time.ZoneId.systemDefault())
+            val formatter = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+            "Son güncelleme: ${dt.format(formatter)}"
         } else {
             "Henüz indirilmedi (çevrimiçi kullanılır)"
         }
