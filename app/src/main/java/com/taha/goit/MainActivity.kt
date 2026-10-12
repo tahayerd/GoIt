@@ -8,6 +8,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.lifecycle.lifecycleScope
 import com.taha.goit.location.LocationHelper
 import com.taha.goit.service.JourneyService
@@ -47,7 +49,8 @@ class MainActivity : ComponentActivity() {
         viewModel.setSettingsManager(app.settingsManager)
 
         setContent {
-            GoItTheme {
+            val uiState by viewModel.uiState.collectAsState()
+            GoItTheme(themeMode = uiState.themeMode) {
                 MainScreen(
                     viewModel = viewModel,
                     favoritesManager = (application as GoItApp).favoritesManager,

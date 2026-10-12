@@ -126,7 +126,8 @@ data class MainUiState(
     // Ayarlar (Yürüme limitleri & bildirimler)
     val walkAccessMeters: Int = 800,
     val walkTransferMeters: Int = 400,
-    val favoriteAlertsEnabled: Boolean = false
+    val favoriteAlertsEnabled: Boolean = false,
+    val themeMode: String = "system" // "system" | "light" | "dark" | "amoled"
 )
 
 class MainViewModel : ViewModel() {
@@ -175,8 +176,14 @@ class MainViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(
             walkAccessMeters = manager.walkAccessMeters,
             walkTransferMeters = manager.walkTransferMeters,
-            favoriteAlertsEnabled = manager.favoriteAlertsEnabled
+            favoriteAlertsEnabled = manager.favoriteAlertsEnabled,
+            themeMode = manager.themeMode
         )
+    }
+
+    fun updateThemeMode(mode: String) {
+        settingsManager?.themeMode = mode
+        _uiState.value = _uiState.value.copy(themeMode = mode)
     }
 
     fun updateWalkAccess(meters: Int) {
@@ -959,14 +966,60 @@ class MainViewModel : ViewModel() {
                 }
 
                 val newMap = mutableMapOf<String, String>()
+                val cal = java.util.Calendar.getInstance()
+                val calDow = cal.get(java.util.Calendar.DAY_OF_WEEK)
+                val currentWeekDay = when (calDow) {
+                    java.util.Calendar.SATURDAY -> 2
+                    java.util.Calendar.SUNDAY -> 3
+                    else -> 1
+                }
+                val nowMinutes = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+
                 for ((sId, code) in uniquePairs) {
                     val list = etasByStop[sId] ?: emptyList()
                     val match = list.firstOrNull { it.routeCode.equals(code, ignoreCase = true) }
                     val raw = match?.realTime ?: match?.passTime
-                    val etaStr = if (!raw.isNullOrBlank()) {
-                        formatEtaTime(raw)
-                    } else null
-                    newMap["$sId:$code"] = if (etaStr != null && etaStr != "-") "~$etaStr" else "–"
+                    var etaStr: String? = null
+                    if (!raw.isNullOrBlank()) {
+                        etaStr = formatEtaTime(raw)
+                    }
+
+                    if (etaStr != null && etaStr != "-") {
+                        newMap["$sId:$code"] = "~$etaStr"
+                    } else {
+                        // Canlı GPS yoksa veya araç henüz hatta çıkmadıysa:
+                        // Tarife (Schedule) tablosundan sonraki kalkış saatini bul ve tahmin et
+                        try {
+                            val schedule = repository.getStopSchedule(sId, currentWeekDay)
+                            val routeSchedule = schedule.filter { it.routeCode.equals(code, ignoreCase = true) }
+                            // stopTime formatı "HH:mm" veya "HH:mm:ss"
+                            val futureRuns = routeSchedule.mapNotNull { item ->
+                                val timeStr = item.stopTime ?: return@mapNotNull null
+                                val parts = timeStr.split(":")
+                                val h = parts.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+                                val m = parts.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
+                                val totalMin = h * 60 + m
+                                totalMin to timeStr
+                            }.filter { it.first >= nowMinutes }
+                                .sortedBy { it.first }
+
+                            val nextRun = futureRuns.firstOrNull()
+                            if (nextRun != null) {
+                                val diff = nextRun.first - nowMinutes
+                                newMap["$sId:$code"] = if (diff in 0..120) "~$diff dk (Planlı)" else "Planlı ${nextRun.second.take(5)}"
+                            } else {
+                                // Gün içindeki son sefer bitmiş olabilir, ilk sabah seferine bak
+                                val firstRun = routeSchedule.mapNotNull { it.stopTime }.sorted().firstOrNull()
+                                if (firstRun != null) {
+                                    newMap["$sId:$code"] = "İlk: ${firstRun.take(5)}"
+                                } else {
+                                    newMap["$sId:$code"] = "Sefer planı bekleniyor"
+                                }
+                            }
+                        } catch (_: Exception) {
+                            newMap["$sId:$code"] = "Bekleniyor"
+                        }
+                    }
                 }
                 _uiState.value = _uiState.value.copy(planEtas = newMap)
                 delay(30_000L)

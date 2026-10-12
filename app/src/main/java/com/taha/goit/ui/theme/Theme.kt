@@ -41,13 +41,39 @@ private val DarkColors = darkColorScheme(
     outline = Color(0xFF5F6368)
 )
 
+/** Saf AMOLED Koyu Tema: Arka plan #000000, batarya tasarrufu ve derin siyahlar */
+private val AmoledColors = darkColorScheme(
+    primary = Color(0xFF8AB4F8),
+    onPrimary = Color.Black,
+    primaryContainer = Color(0xFF174EA6),
+    onPrimaryContainer = Color(0xFFD3E3FD),
+    secondary = Color(0xFF81C995),
+    onSecondary = Color.Black,
+    background = Color(0xFF000000),
+    onBackground = Color(0xFFF1F3F4),
+    surface = Color(0xFF0A0A0A),
+    onSurface = Color(0xFFF1F3F4),
+    surfaceVariant = Color(0xFF161616),
+    onSurfaceVariant = Color(0xFF9AA0A6),
+    tertiary = Color(0xFFF28B82),
+    outline = Color(0xFF3C4043)
+)
+
 @Composable
 fun GoItTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: String = "system",
     content: @Composable () -> Unit
 ) {
+    val isSystemDark = isSystemInDarkTheme()
+    val colors = when (themeMode) {
+        "amoled" -> AmoledColors
+        "dark" -> DarkColors
+        "light" -> LightColors
+        else -> if (isSystemDark) DarkColors else LightColors
+    }
+
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = colors,
         content = content
     )
 }

@@ -63,7 +63,48 @@ fun SettingsScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Bölüm 1: Yürüme Mesafesi
+                    // Bölüm 1: Görünüm & Tema (Madde 5)
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Görünüm & Tema", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "AMOLED ekranlar için saf siyah arka plan pil tasarrufu sağlar.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    listOf(
+                                        "system" to "Sistem",
+                                        "light" to "Açık",
+                                        "dark" to "Koyu",
+                                        "amoled" to "AMOLED"
+                                    ).forEach { (mode, label) ->
+                                        FilterChip(
+                                            selected = uiState.themeMode == mode,
+                                            onClick = { viewModel.updateThemeMode(mode) },
+                                            label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Bölüm 2: Yürüme Mesafesi
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -237,7 +278,7 @@ fun SettingsScreen(
                                 if (showResetToast) {
                                     Spacer(Modifier.height(6.dp))
                                     Text(
-                                        "✓ Tanıtım bir sonraki açılışta gösterilecek.",
+                                        "Tanıtım bir sonraki açılışta gösterilecek.",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.primary
                                     )
@@ -260,7 +301,7 @@ fun SettingsScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text("GoIt", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                Text("Sürüm 1.3.0", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                Text("Sürüm 1.5.0", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     "Reklamsız, izleyicisiz Bursa toplu taşıma asistanı.",

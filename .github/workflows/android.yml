@@ -3,6 +3,7 @@ name: Build APK
 on:
   push:
     branches: [ master, main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 permissions:
@@ -19,15 +20,13 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
-          distribution: temurin
-          java-version: 17
+            distribution: temurin
+            java-version: 17
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # The standalone "tools" package no longer exists in the SDK repo
-          # (replaced by cmdline-tools), so only install platform-tools here.
-          packages: "platform-tools"
+            packages: "platform-tools"
 
       - name: Install required SDK components
         run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools"
@@ -42,7 +41,6 @@ jobs:
         run: |
           BT=$(ls -d $ANDROID_HOME/build-tools/35.0.0 | head -1)
           echo "Using build-tools: $BT"
-          # ELF segment check for 64-bit ABIs
           "$BT/zipalign" -c -P 16 -v 4 app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK artifact
@@ -52,8 +50,28 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Publish/update rolling release
-        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+      - name: Publish versioned release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "GoIt ${{ github.ref_name }}"
+          prerelease: false
+          files: app/build/outputs/apk/debug/app-debug.apk
+          body: |
+            GoIt Bursa Transit ${{ github.ref_name }}
+
+            - Trip Tab Focus & Auto-Collapse: tapping search collapses route alternatives; tapping alternatives collapses search to single-line summary
+            - Right-Aligned Route Alternative ETAs: all routes show estimated arrival countdown on the right (live GPS or scheduled timetable fallback)
+            - Clean Journey Mode Layout: search card and alternatives automatically hide when journey begins; HUD fits seamlessly above navigation bar
+            - Comprehensive Live HUD: live bus arrival countdown while waiting, expandable route stop list (passed/current/upcoming) with time-to-destination estimation, walk distance & minutes
+            - Pure AMOLED Dark Theme: true `#000000` background option in Settings for battery savings and high contrast
+            - Clean Professional UI: all emojis replaced with sharp Material Design icons
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish/update rolling latest release
+        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
@@ -61,13 +79,13 @@ jobs:
           prerelease: true
           files: app/build/outputs/apk/debug/app-debug.apk
           body: |
-            GoIt Bursa Transit v1.4.0
+            GoIt Bursa Transit v1.5.0
 
-            - Fully Automatic Journey Mode (Moovit-style): boarding is auto-detected from GPS speed and distance from stop - no manual confirmation
-            - One-way stop counter: immune to GPS jitter, never counts backwards
-            - Moovit-pattern live notifications: "line arriving in ~X min", "Arriving soon - 2 stops left", "Get ready - next stop is yours", arrival celebration
-            - Redesigned journey overlay: alight-imminent warning banner, automatic detection badge, single End Trip action
-            - Slow-traffic fallback boarding detection (congested streets)
-            - (v1.3.0) Google Maps link resolution, onboarding, amenity badges, saved places, journey history, sort chips, settings
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            - Trip Tab Focus & Auto-Collapse: tapping search collapses route alternatives; tapping alternatives collapses search to single-line summary
+            - Right-Aligned Route Alternative ETAs: all routes show estimated arrival countdown on the right (live GPS or scheduled timetable fallback)
+            - Clean Journey Mode Layout: search card and alternatives automatically hide when journey begins; HUD fits seamlessly above navigation bar
+            - Comprehensive Live HUD: live bus arrival countdown while waiting, expandable route stop list (passed/current/upcoming) with time-to-destination estimation, walk distance & minutes
+            - Pure AMOLED Dark Theme: true `#000000` background option in Settings for battery savings and high contrast
+            - Clean Professional UI: all emojis replaced with sharp Material Design icons
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

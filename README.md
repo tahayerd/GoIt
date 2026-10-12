@@ -9,21 +9,19 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 - **Google Maps Integration:** Share or paste Google Maps links (short links, embed URLs, CID hex coordinates) directly into GoIt to set trip endpoints.
 - **Alternative Routes & Sorting:** Sort route alternatives by **Önerilen** (Recommended), **En Hızlı** (Fastest), **Az Yürüme** (Least Walking), or **Az Aktarma** (Least Transfers).
 - **Realistic Durations & Live ETAs:** Distance-based bus run times (~22 km/h + dwell times), live board ETAs (`~X dk sonra`), and calculated arrival times.
-- **Kayıtlı Yerler & Geçmiş:** One-tap Home (🏠) and Work (💼) shortcuts, custom bookmarked places, and recent journey history.
+- **Kayıtlı Yerler & Geçmiş:** One-tap Home and Work shortcuts, custom bookmarked places, and recent journey history.
 
 ### Canlı Yolculuk Modu (Live Directions)
-- Tap **"Yolculuğu Başlat ▶"** on any selected plan to launch full turn-by-turn transit guidance.
+- Tap **"Yolculuğu Başlat"** on any selected plan to launch full turn-by-turn transit guidance.
 - **In-App HUD Overlay & Foreground Service (fully automatic, Moovit-style):**
   - **Yürüyüş (Walk):** Live walking distance and time countdown to board stop.
   - **Bekleme (Wait):** Live bus arrival ETA polling; boarding is **auto-detected** from GPS speed and distance from stop (no manual confirmation).
-  - **Araçta (Ride):** One-way stop countdown ("N durak kaldı") immune to GPS jitter, with next stop announcements.
+  - **Araçta (Ride):** One-way stop countdown ("N durak kaldı"), expandable stop list (passed, current, upcoming) with remaining duration estimation.
   - **İniş Uyarısı:** "Get ready" high-priority vibration alarm when approaching the alight stop (<= 250 m or <= 1 stop remaining), with red imminent-alight banner.
   - **Varış (Arrival):** Celebration alert upon reaching the final destination.
 
 ### Duraklar (Stops)
-- Nearby stops sorted by distance with live approaching-bus ETAs, fares, and vehicle amenity indicators:
-  - ❄ **Klima (AC)**
-  - ♿ **Tekerlekli Sandalye / Engelli Erişimi**
+- Nearby stops sorted by distance with live approaching-bus ETAs, fares, and vehicle amenity indicators (AC, wheelchair access).
 - Stop detail: upcoming arrivals (10 s auto-refresh), full day schedule, and served lines.
 - Guaranteed single nearest-stop **"Sen burdasın"** badge.
 
@@ -33,13 +31,14 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 - Route detail: live vehicle positions on the map with animated bus markers, speed, plate numbers, and direction filters.
 
 ### Ayarlar & Özelleştirme (Settings)
+- **Tema Seçimi:** System / Light / Dark / Pure AMOLED (`#000000`).
 - Configurable maximum walking distance limits:
   - **Erişim Yürüyüşü:** 400 m, 600 m, 800 m, 1200 m
   - **Aktarma Yürüyüşü:** 200 m, 300 m, 400 m, 600 m
 - Saved places manager and onboarding tour reset.
 
 ### İlk Açılış Rehberi (Onboarding)
-- 5-step interactive tour explaining tabs, features, and managing location & notification permissions.
+- 5-step interactive tour explaining tabs, features, and managing location & notification permissions (clean professional UI).
 
 ## Privacy
 - Zero analytics, ads, or tracker SDKs.
@@ -51,7 +50,7 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 - **Maps:** MapLibre Native Android 11.13.5 + Carto Positron / Dark Matter (no Google Play Services)
 - **Networking:** OkHttp + kotlinx.serialization
 - **Async:** Coroutines & StateFlow (MVVM)
-- **Theme:** Material 3 with automatic dark mode
+- **Theme:** Material 3 with Light, Dark, and Pure AMOLED options
 - **16 KB Page-Size:** Fully verified native ELF alignment (AGP 8.5.2, build-tools 35.0.0, zipalign -P 16)
 
 ## Building

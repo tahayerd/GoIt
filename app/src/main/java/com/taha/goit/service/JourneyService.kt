@@ -258,15 +258,16 @@ class JourneyService : Service(), LocationListener {
                     } else {
                         "$route hattı bekleniyor"
                     }
-                    val detail = "🚏 ${stage.targetName} • $etaPart"
+                    val detail = "Durak: ${stage.targetName} • $etaPart"
                     JourneyTracker.state.value = JourneyTracker.RuntimeState(
                         stageIndex = stageIndex,
                         stageType = "wait",
                         title = stage.title.ifEmpty { "$route hattını bekle" },
                         detail = detail,
-                        progress = 0f
+                        progress = 0f,
+                        waitEtaMinutes = currentWaitEta
                     )
-                    updateNotification("$etaPart • 🚏 ${stage.targetName}", isAlert = false)
+                    updateNotification("$etaPart • Durak: ${stage.targetName}", isAlert = false)
                 } catch (_: Exception) {
                 }
                 delay(20_000L)
@@ -285,12 +286,12 @@ class JourneyService : Service(), LocationListener {
             JourneyTracker.state.value = JourneyTracker.RuntimeState(
                 stageIndex = stageIndex,
                 stageType = "arrived",
-                title = "Hedefe ulaştın! 🎉",
+                title = "Hedefe ulaştın",
                 detail = destName,
                 progress = 1f
             )
-            sendArrivalAlert("İndin! Hedefe ulaştın 🎉 • $destName")
-            updateNotification("İndin! Hedefe ulaştın 🎉 • $destName", isAlert = true)
+            sendArrivalAlert("İndin. Hedefe ulaştın • $destName")
+            updateNotification("İndin. Hedefe ulaştın • $destName", isAlert = true)
             serviceScope.launch {
                 delay(60_000L)
                 stopTracking()
@@ -431,12 +432,13 @@ class JourneyService : Service(), LocationListener {
                     title = currentStage.title.ifEmpty { "${currentStage.targetName} yürü" },
                     detail = detail,
                     distanceToNextMeters = dist,
-                    progress = progress
+                    progress = progress,
+                    walkMinutes = etaMin
                 )
                 updateNotification("${currentStage.title} • $detail", isAlert = false)
 
                 if (dist <= 60.0) {
-                    advanceStage("🚏 Durağa ulaştın")
+                    advanceStage("Durağa ulaştın")
                 }
             }
 
@@ -455,15 +457,16 @@ class JourneyService : Service(), LocationListener {
                 } else {
                     "$route hattı bekleniyor"
                 }
-                val detail = "🚏 ${currentStage.targetName} • $etaPart"
+                val detail = "Durak: ${currentStage.targetName} • $etaPart"
                 JourneyTracker.state.value = JourneyTracker.RuntimeState(
                     stageIndex = stageIndex,
                     stageType = "wait",
                     title = currentStage.title.ifEmpty { "$route hattını bekle" },
                     detail = detail,
-                    progress = 0f
+                    progress = 0f,
+                    waitEtaMinutes = currentWaitEta
                 )
-                updateNotification("$etaPart • 🚏 ${currentStage.targetName}", isAlert = false)
+                updateNotification("$etaPart • Durak: ${currentStage.targetName}", isAlert = false)
 
                 // Otomatik biniş algılama (Moovit tarzı, kullanıcı onayı yok):
                 // 1) Hızlı hareket: >12 km/h VE duraktan >150 m uzakta — ardışık 2 fix (~10 sn)
@@ -506,10 +509,18 @@ class JourneyService : Service(), LocationListener {
                     (effectiveIdx + 1).coerceAtMost(currentStage.stops.size - 1)
                 )?.name ?: currentStage.targetName
                 val route = currentStage.routeCode ?: "Otobüs"
-                val detail = "Sıradaki: $nextStopName • $stopsRemaining durak kaldı"
+                val estMinutes = (stopsRemaining * 1.8).roundToInt().coerceAtLeast(1)
+                val detail = "Sıradaki: $nextStopName • $stopsRemaining durak kaldı (~$estMinutes dk)"
                 val progress = if (currentStage.stops.size > 1) {
                     (effectiveIdx.toFloat() / (currentStage.stops.size - 1)).coerceIn(0f, 1f)
                 } else 0f
+
+                val passedList = if (currentStage.stops.isNotEmpty()) {
+                    currentStage.stops.take(effectiveIdx).map { it.name }
+                } else emptyList()
+                val upcomingList = if (currentStage.stops.isNotEmpty()) {
+                    currentStage.stops.drop(effectiveIdx + 1).map { it.name }
+                } else emptyList()
 
                 JourneyTracker.state.value = JourneyTracker.RuntimeState(
                     stageIndex = stageIndex,
@@ -518,7 +529,11 @@ class JourneyService : Service(), LocationListener {
                     detail = detail,
                     stopsRemaining = stopsRemaining,
                     distanceToNextMeters = distToAlight,
-                    progress = progress
+                    progress = progress,
+                    passedStops = passedList,
+                    currentStopName = nextStopName,
+                    upcomingStops = upcomingList,
+                    estimatedMinutesRemaining = estMinutes
                 )
                 updateNotification("$route • $detail", isAlert = false)
 

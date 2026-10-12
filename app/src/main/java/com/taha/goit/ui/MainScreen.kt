@@ -67,8 +67,13 @@ fun MainScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val darkTheme = isSystemInDarkTheme()
-    val styleUrl = if (darkTheme) STYLE_DARK else STYLE_LIGHT
+    val isSystemDark = isSystemInDarkTheme()
+    val isDark = when (uiState.themeMode) {
+        "amoled", "dark" -> true
+        "light" -> false
+        else -> isSystemDark
+    }
+    val styleUrl = if (isDark) STYLE_DARK else STYLE_LIGHT
 
     val prefs = remember { context.getSharedPreferences("goit_prefs", Context.MODE_PRIVATE) }
     var showOnboarding by rememberSaveable {
@@ -218,6 +223,14 @@ fun MainScreen(
                     )
                 }
             }
+
+            // Canlı Yolculuk HUD Kartı: Scaffold content sınırları içinde, alt sekmelerin üzerinde düzgünce yerleşir
+            JourneyScreen(
+                onStopJourney = {
+                    JourneyService.stop(context)
+                },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
     }
 
@@ -344,12 +357,6 @@ fun MainScreen(
             }
         )
     }
-
-    JourneyScreen(
-        onStopJourney = {
-            JourneyService.stop(context)
-        }
-    )
 }
 
 // =========================================================
@@ -364,10 +371,21 @@ private fun TripTab(
     onStartJourney: (Double, Double, String) -> Unit,
     onOpenSettings: () -> Unit
 ) {
+    // Madde 3: Yolculuk başlamışken arama ve rota alternatifleri ekranları tamamen kapatılır
+    val journeyActive by com.taha.goit.service.JourneyTracker.state.collectAsState()
+    if (journeyActive != null) return
+
+    // Madde 1: Üst/alt sekme odaklanma ve daralma mantığı
+    var activeFocus by rememberSaveable { mutableStateOf<String?>(null) } // "top" | "bottom" | null
+
     Box(modifier = Modifier.fillMaxSize()) {
         TripSearchCard(
             uiState = uiState,
             viewModel = viewModel,
+            isCollapsed = activeFocus == "bottom" && uiState.tripPlans.isNotEmpty(),
+            onToggleCollapse = {
+                activeFocus = if (activeFocus == "top") null else "top"
+            },
             onOpenSettings = onOpenSettings,
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -377,6 +395,10 @@ private fun TripTab(
             uiState = uiState,
             viewModel = viewModel,
             favoritesManager = favoritesManager,
+            isCollapsed = activeFocus == "top",
+            onToggleCollapse = {
+                activeFocus = if (activeFocus == "bottom") null else "bottom"
+            },
             onStartJourney = onStartJourney,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
@@ -387,6 +409,8 @@ private fun TripTab(
 private fun TripSearchCard(
     uiState: MainUiState,
     viewModel: MainViewModel,
+    isCollapsed: Boolean = false,
+    onToggleCollapse: () -> Unit = {},
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -401,7 +425,34 @@ private fun TripSearchCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        if (isCollapsed && uiState.tripSearchField == null) {
+            // Daraltılmış Kompakt Görünüm (Madde 1)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleCollapse)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Directions, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "${uiState.tripOrigin?.name ?: "Kalkış"} → ${uiState.tripDestination?.name ?: "Varış"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Icon(Icons.Default.ExpandMore, "Genişlet", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            Column(modifier = Modifier.padding(12.dp)) {
             if (uiState.tripSearchField != null) {
                 // ---- Arama modu ----
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -592,6 +643,7 @@ private fun TripSearchCard(
                 }
             }
         }
+        }
     }
 
     // Dialog: Yer Kaydet (F2)
@@ -610,17 +662,20 @@ private fun TripSearchCard(
                         FilterChip(
                             selected = saveKind == "home",
                             onClick = { saveKind = "home" },
-                            label = { Text("🏠 Ev") }
+                            leadingIcon = { Icon(Icons.Default.Home, null, modifier = Modifier.size(16.dp)) },
+                            label = { Text("Ev") }
                         )
                         FilterChip(
                             selected = saveKind == "work",
                             onClick = { saveKind = "work" },
-                            label = { Text("💼 İş") }
+                            leadingIcon = { Icon(Icons.Default.Work, null, modifier = Modifier.size(16.dp)) },
+                            label = { Text("İş") }
                         )
                         FilterChip(
                             selected = saveKind == "custom",
                             onClick = { saveKind = "custom" },
-                            label = { Text("★ Özel") }
+                            leadingIcon = { Icon(Icons.Default.Star, null, modifier = Modifier.size(16.dp)) },
+                            label = { Text("Özel") }
                         )
                     }
                     if (saveKind == "custom") {
@@ -813,6 +868,8 @@ private fun TripBottomPanel(
     uiState: MainUiState,
     viewModel: MainViewModel,
     favoritesManager: FavoritesManager,
+    isCollapsed: Boolean = false,
+    onToggleCollapse: () -> Unit = {},
     onStartJourney: (Double, Double, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -827,43 +884,88 @@ private fun TripBottomPanel(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Rota Alternatifleri", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        if (uiState.isTripPlanning) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        }
-                        IconButton(onClick = { viewModel.clearTrip() }) {
-                            Icon(Icons.Default.Close, "Kapat")
-                        }
-                    }
-
-                    if (uiState.selectedPlan != null) {
-                        Button(
-                            onClick = {
-                                val json = viewModel.buildJourneyPayloadJson()
-                                if (json != null) {
-                                    if (LocationHelper.hasPermission(context)) {
-                                        JourneyService.startJourney(context, json)
-                                    } else {
-                                        Toast.makeText(context, "Canlı rehberlik için konum izni gerekli", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF16A34A),
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(12.dp)
+                if (isCollapsed && uiState.tripPlans.isNotEmpty()) {
+                    // Daraltılmış Kompakt Görünüm (Madde 1)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onToggleCollapse)
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Yolculuğu Başlat ▶", fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.AltRoute, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "Rota Alternatifleri (${uiState.tripPlans.size})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (uiState.selectedPlan != null) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "• Seçili: ${uiState.selectedPlan!!.routeCode}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
+                        Icon(Icons.Default.ExpandLess, "Genişlet", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                } else {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Rota Alternatifleri",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable(onClick = onToggleCollapse)
+                            )
+                            if (uiState.isTripPlanning) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            }
+                            IconButton(onClick = onToggleCollapse) {
+                                Icon(Icons.Default.ExpandMore, "Daralt")
+                            }
+                            IconButton(onClick = { viewModel.clearTrip() }) {
+                                Icon(Icons.Default.Close, "Kapat")
+                            }
+                        }
+
+                        if (uiState.selectedPlan != null) {
+                            Button(
+                                onClick = {
+                                    val json = viewModel.buildJourneyPayloadJson()
+                                    if (json != null) {
+                                        if (LocationHelper.hasPermission(context)) {
+                                            JourneyService.startJourney(context, json)
+                                        } else {
+                                            Toast.makeText(context, "Canlı rehberlik için konum izni gerekli", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF16A34A),
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Yolculuğu Başlat", fontWeight = FontWeight.Bold)
+                            }
+                        }
                     val sortedPlans = remember(uiState.tripPlans, uiState.planSort) {
                         when (uiState.planSort) {
                             "hizli" -> {
@@ -950,6 +1052,7 @@ private fun TripBottomPanel(
                         }
                     }
                 }
+                }
             }
         }
 
@@ -997,7 +1100,7 @@ private fun PlanRow(
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // İkon / rozet
+        // Sol İkon / Hat Rozeti
         if (plan.isWalkOnly) {
             Box(
                 modifier = Modifier
@@ -1007,37 +1110,22 @@ private fun PlanRow(
                 Icon(Icons.Default.DirectionsWalk, "Yürüyüş", tint = Color.White, modifier = Modifier.size(20.dp))
             }
         } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .background(
-                            if (plan.isTransfer) Color(0xFFE37400) else Color(0xFF1A73E8),
-                            RoundedCornerShape(8.dp)
-                        )
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Text(plan.routeCode, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
-                }
-                if (!etaText.isNullOrBlank() && etaText != "–") {
-                    Spacer(Modifier.width(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .background(Color(0xFF0F9D58).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 6.dp, vertical = 3.dp)
-                    ) {
-                        Text(
-                            "🚍 $etaText sonra",
-                            color = Color(0xFF0F9D58),
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
-                }
+            Box(
+                modifier = Modifier
+                    .background(
+                        if (plan.isTransfer) Color(0xFFE37400) else Color(0xFF1A73E8),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(plan.routeCode, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
             }
         }
+
         Spacer(Modifier.width(12.dp))
+
+        // Orta: Güzergah Bacakları & Süre Özeti
         Column(modifier = Modifier.weight(1f)) {
-            // Moovit tarzı bacak şeridi
             if (plan.isWalkOnly) {
                 Text("Sadece yürü", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 Text(
@@ -1059,6 +1147,38 @@ private fun PlanRow(
                 )
             }
         }
+
+        // Sağ: Sağa Yaslanmış Otobüs Geliş Zamanı (Madde 2)
+        if (!plan.isWalkOnly) {
+            val isScheduled = etaText?.contains("Planlı", ignoreCase = true) == true || etaText?.contains("İlk", ignoreCase = true) == true
+            val displayEta = if (!etaText.isNullOrBlank() && etaText != "–") etaText else "Hesaplanıyor"
+            val badgeColor = if (isScheduled) Color(0xFF1976D2) else Color(0xFF0F9D58)
+
+            Box(
+                modifier = Modifier
+                    .padding(start = 6.dp)
+                    .background(badgeColor.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 7.dp, vertical = 4.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (isScheduled) Icons.Default.Schedule else Icons.Default.DirectionsBus,
+                        contentDescription = null,
+                        tint = badgeColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        displayEta,
+                        color = badgeColor,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.width(6.dp))
         Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

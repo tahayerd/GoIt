@@ -170,7 +170,7 @@ fun OnboardingScreen(
                         onClick = onComplete,
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("Başla 🎉", fontWeight = FontWeight.Bold)
+                        Text("Başla", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -198,14 +198,14 @@ private fun OnboardingPagePermissions(
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            "GoIt'e Hoş Geldin 👋",
+            "GoIt'e Hoş Geldiniz",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            "Reklamsız, izleyicisiz Bursa ulaşım asistanın. Başlamadan önce iki izne ihtiyacımız var:",
+            "Reklamsız, izleyicisiz Bursa ulaşım asistanınız. Başlamadan önce iki izne ihtiyacımız var:",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -231,7 +231,11 @@ private fun OnboardingPagePermissions(
                     Text("Yakındaki durakları ve canlı rehberliği sunar", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (hasLocation) {
-                    Text("✓ İzin Verildi", color = Color(0xFF0F9D58), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Check, null, tint = Color(0xFF0F9D58), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("İzin Verildi", color = Color(0xFF0F9D58), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                    }
                 } else {
                     FilledTonalButton(onClick = onRequestLocation, shape = RoundedCornerShape(8.dp)) {
                         Text("İzin Ver")
@@ -261,7 +265,11 @@ private fun OnboardingPagePermissions(
                     Text("İniş alarmı ve hat yaklaşım uyarıları için", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (hasNotification) {
-                    Text("✓ İzin Verildi", color = Color(0xFF0F9D58), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Check, null, tint = Color(0xFF0F9D58), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("İzin Verildi", color = Color(0xFF0F9D58), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                    }
                 } else {
                     FilledTonalButton(onClick = onRequestNotification, shape = RoundedCornerShape(8.dp)) {
                         Text("İzin Ver")
@@ -298,14 +306,14 @@ private fun OnboardingPageTrip() {
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            "Yol Tarifi 🧭",
+            "Yol Tarifi",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(14.dp))
         Text(
-            "A'dan B'ye: mekan adı yaz ya da Google Maps linkini veya koordinatı yapıştır.\n\nKalkış için 'Konumumu kullan', varışı seç, 'Rota Bul'a bas. Otobüs + yürüme + aktarma alternatifleri saniyeler içinde karşında.",
+            "A'dan B'ye: mekan adı yazın ya da Google Maps linkini veya koordinatı yapıştırın.\n\nKalkış için 'Konumumu kullan', varışı seçin, 'Rota Bul'a basın. Otobüs, yürüme ve aktarma alternatifleri anında karşınızda.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -317,15 +325,24 @@ private fun OnboardingPageTrip() {
             shape = RoundedCornerShape(12.dp)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    "💡 İpucu: Haritalar Paylaşımı",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Info,
+                        null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "İpucu: Haritalar Paylaşımı",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Google Maps'te bir yer bulduğunda Paylaş → GoIt seç. Hedef otomatik dolar; anında rota oluşturabilirsin.",
+                    "Google Maps'te bir yer bulduğunuzda Paylaş → GoIt seçin. Hedef otomatik dolar; anında rota oluşturabilirsiniz.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
@@ -348,14 +365,14 @@ private fun OnboardingPageStops() {
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            "Duraklar 📍",
+            "Duraklar",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(14.dp))
         Text(
-            "Sana en yakın duraklar, canlı varış dakikaları ve ücretler tek ekranda.\n\nDurağa dokun: yaklaşan otobüsler, araç özellikleri (klima ❄, engelli rampası ♿) ve 'Buradan Git' ile hızlı rota planı.\n\nYıldızla favorilerine ekle, yaklaşım bildirimlerini aç.",
+            "En yakın duraklar, canlı varış dakikaları ve ücretler tek ekranda.\n\nDurağa dokunun: yaklaşan otobüsler, araç özellikleri (klima, engelli rampası) ve 'Buradan Git' ile hızlı rota planı.\n\nFavorilerinize ekleyin, yaklaşım bildirimlerini açın.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -377,14 +394,14 @@ private fun OnboardingPageRoutes() {
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            "Hatlar 🚌",
+            "Hatlar",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(14.dp))
         Text(
-            "Bursa'daki 409 hattın tamamı: ara, favorile, canlı takip et.\n\nEn üstte en yakın durağına şu an gelen hatlar listelenir. Hat detayında tüm duraklar, harita üzerinde hareket eden gerçek araçlar ve 'Sen burdasın' rozeti bulunur.",
+            "Bursa'daki 409 hattın tamamı: arayın, favorileyin, canlı takip edin.\n\nEn üstte en yakın durağınıza gelen hatlar listelenir. Hat detayında tüm duraklar, harita üzerinde hareket eden araçlar ve 'Sen burdasın' rozeti bulunur.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -406,7 +423,7 @@ private fun OnboardingPageReady() {
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            "Hazırsın! 🎉",
+            "Hazırsınız",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center

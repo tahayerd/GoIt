@@ -17,6 +17,10 @@ class SettingsManager(context: Context) {
         get() = prefs.getBoolean("favorite_alerts_enabled", false)
         set(value) = prefs.edit().putBoolean("favorite_alerts_enabled", value).apply()
 
+    var themeMode: String
+        get() = prefs.getString("theme_mode", "system") ?: "system" // "system" | "light" | "dark" | "amoled"
+        set(value) = prefs.edit().putString("theme_mode", value).apply()
+
     fun resetOnboarding() {
         prefs.edit().remove("onboarding_done_v1").apply()
     }
