@@ -224,14 +224,14 @@ fun MainScreen(
                     )
                 }
             } else {
-                // Sürükleme bittiği an: 2 saniyelik zamanlayıcı başlar
-                // İlk 1 sn küçülmüş bekler, 1. sn'den itibaren 1 sn boyunca yavaşça tam açık konuma genişler
+                // Sürükleme bittiği an: 1 saniyelik toplam zamanlayıcı
+                // İlk 0.5 sn (500 ms) küçülmüş kalır, 0.5. sn'den itibaren 500 ms boyunca pürüzsüzce tam açılır
                 restoreJob?.cancel()
                 restoreJob = scope.launch {
-                    delay(1000L)
+                    delay(500L)
                     mapInteractionProgress.animateTo(
                         0f,
-                        animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing)
+                        animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing)
                     )
                 }
             }
@@ -242,49 +242,47 @@ fun MainScreen(
         if (abs(tabAnim.targetValue - selectedTab.toFloat()) > 0.01f) {
             tabAnim.animateTo(
                 selectedTab.toFloat(),
-                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1600f)
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = 450f)
             )
         }
     }
 
-    fun Modifier.swipeableTabs(): Modifier = this.pointerInput(selectedTab) {
-        coroutineScope {
-            var totalDrag = 0f
-            detectHorizontalDragGestures(
-                onDragStart = { totalDrag = 0f },
-                onDragEnd = {
-                    val current = tabAnim.value
-                    val target = when {
-                        totalDrag < -screenWidthPx * 0.18f && selectedTab < 2 -> selectedTab + 1
-                        totalDrag > screenWidthPx * 0.18f && selectedTab > 0 -> selectedTab - 1
-                        else -> kotlin.math.round(current).toInt().coerceIn(0, 2)
-                    }
-                    selectedTab = target
-                    launch {
-                        tabAnim.animateTo(
-                            target.toFloat(),
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1600f)
-                        )
-                    }
-                },
-                onDragCancel = {
-                    launch {
-                        tabAnim.animateTo(
-                            selectedTab.toFloat(),
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1600f)
-                        )
-                    }
-                },
-                onHorizontalDrag = { change, dragAmount ->
-                    change.consume()
-                    totalDrag += dragAmount
-                    val newVal = (tabAnim.value - dragAmount / screenWidthPx).coerceIn(0f, 2f)
-                    launch {
-                        tabAnim.snapTo(newVal)
-                    }
+    fun Modifier.swipeableTabs(): Modifier = this.pointerInput(Unit) {
+        var totalDrag = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { totalDrag = 0f },
+            onDragEnd = {
+                val current = tabAnim.value
+                val target = when {
+                    totalDrag < -screenWidthPx * 0.18f && selectedTab < 2 -> selectedTab + 1
+                    totalDrag > screenWidthPx * 0.18f && selectedTab > 0 -> selectedTab - 1
+                    else -> kotlin.math.round(current).toInt().coerceIn(0, 2)
                 }
-            )
-        }
+                selectedTab = target
+                scope.launch {
+                    tabAnim.animateTo(
+                        target.toFloat(),
+                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 450f)
+                    )
+                }
+            },
+            onDragCancel = {
+                scope.launch {
+                    tabAnim.animateTo(
+                        selectedTab.toFloat(),
+                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 450f)
+                    )
+                }
+            },
+            onHorizontalDrag = { change, dragAmount ->
+                change.consume()
+                totalDrag += dragAmount
+                val newVal = (tabAnim.value - dragAmount / screenWidthPx).coerceIn(0f, 2f)
+                scope.launch {
+                    tabAnim.snapTo(newVal)
+                }
+            }
+        )
     }
 
     Scaffold(
