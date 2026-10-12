@@ -64,25 +64,4 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Publish/update rolling release
-        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: "GoIt - Latest Debug Build"
-          prerelease: true
-          files: app/build/outputs/apk/debug/app-debug.apk
-          body: |
-            GoIt Bursa Transit v1.6.0
 
-            - Schedule Data Pipeline: daily CI timetable crawl + offline on-device chunked schedule cache
-            - Road-Snapped Bus & Walking Routes: snap-to-polyline for live buses, clipped route shapes for planned bus legs, OSRM foot routing for walking legs
-            - Expandable Bus Detail: comprehensive stop progression timeline, fare selection (Standard/Discount/Student), upcoming runs list, estimated arrival time
-            - Continuous Refined Location: smooth live user location marker with white ring & soft drop shadow, battery-efficient lifecycle observer
-            - Enhanced Panel Gestures: vertical drag to expand/collapse, clean headers, auto-collapse on map drag gestures with instant restoration
-            - Fluid Tab Switching: spring-animated tab swipes across designated panels and navigation bar
-            - Dual-Tone Route Visualization: pastel full line overview, solid traveled segment, muted remaining segment
-            - Compact Origin/Destination Picker: single-line inputs with location shortcut, saved places and frequently visited chips
-            - Stable Signing: signed with reproducible fixed keystore for seamless version upgrades without uninstallation
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

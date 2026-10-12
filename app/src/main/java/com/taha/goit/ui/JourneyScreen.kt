@@ -50,11 +50,13 @@ fun JourneyScreen(
         (runtime.stopsRemaining ?: 99) <= 1
 
     val animatedScale by animateFloatAsState(
-        targetValue = if (isMapGestureActive) 0.92f else 1f,
+        targetValue = if (isMapGestureActive) 0.95f else 1f,
+        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f),
         label = "hudScale"
     )
     val animatedAlpha by animateFloatAsState(
-        targetValue = if (isMapGestureActive) 0.85f else 1f,
+        targetValue = if (isMapGestureActive) 0.88f else 1f,
+        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f),
         label = "hudAlpha"
     )
 

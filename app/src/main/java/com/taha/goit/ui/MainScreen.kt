@@ -15,12 +15,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -162,9 +167,48 @@ fun MainScreen(
         if (abs(tabAnim.targetValue - selectedTab.toFloat()) > 0.01f) {
             tabAnim.animateTo(
                 selectedTab.toFloat(),
-                animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
+                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1400f)
             )
         }
+    }
+
+    fun Modifier.panelDragGestures(
+        isCollapsed: Boolean,
+        dragDownToCollapse: Boolean,
+        onToggleCollapse: () -> Unit
+    ): Modifier = this.pointerInput(isCollapsed) {
+        var accumulatedDragY = 0f
+        detectVerticalDragGestures(
+            onDragStart = {
+                accumulatedDragY = 0f
+            },
+            onDragEnd = {
+                val threshold = 36.dp.toPx()
+                if (dragDownToCollapse) {
+                    // Alt panel: aşağı sürüklenince kapanır, yukarı sürüklenince açılır
+                    if (!isCollapsed && accumulatedDragY > threshold) {
+                        onToggleCollapse()
+                    } else if (isCollapsed && accumulatedDragY < -threshold) {
+                        onToggleCollapse()
+                    }
+                } else {
+                    // Üst kart: yukarı sürüklenince kapanır, aşağı sürüklenince açılır
+                    if (!isCollapsed && accumulatedDragY < -threshold) {
+                        onToggleCollapse()
+                    } else if (isCollapsed && accumulatedDragY > threshold) {
+                        onToggleCollapse()
+                    }
+                }
+                accumulatedDragY = 0f
+            },
+            onDragCancel = {
+                accumulatedDragY = 0f
+            },
+            onVerticalDrag = { change, dragAmount ->
+                change.consume()
+                accumulatedDragY += dragAmount
+            }
+        )
     }
 
     fun Modifier.swipeableTabs(): Modifier = this.pointerInput(selectedTab) {
@@ -182,7 +226,7 @@ fun MainScreen(
                 scope.launch {
                     tabAnim.animateTo(
                         target.toFloat(),
-                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1400f)
                     )
                 }
             },
@@ -190,7 +234,7 @@ fun MainScreen(
                 scope.launch {
                     tabAnim.animateTo(
                         selectedTab.toFloat(),
-                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1400f)
                     )
                 }
             },
@@ -263,7 +307,7 @@ fun MainScreen(
                         isMapGestureActive = isMapGestureActive,
                         onStartJourney = onStartJourney,
                         onOpenSettings = { showSettings = true },
-                        modifier = Modifier.swipeableTabs()
+                        modifier = Modifier
                     )
                 }
             }
@@ -321,7 +365,7 @@ fun MainScreen(
                     JourneyService.stop(context)
                 },
                 isMapGestureActive = isMapGestureActive,
-                modifier = Modifier.align(Alignment.BottomCenter).swipeableTabs()
+                modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
     }
@@ -493,6 +537,7 @@ private fun TripTab(
             uiState = uiState,
             viewModel = viewModel,
             isCollapsed = (activeFocus == "bottom" && uiState.tripPlans.isNotEmpty()) || isMapGestureActive,
+            isMapGestureActive = isMapGestureActive,
             onToggleCollapse = {
                 activeFocus = if (activeFocus == "top") null else "top"
             },
@@ -506,6 +551,7 @@ private fun TripTab(
             viewModel = viewModel,
             favoritesManager = favoritesManager,
             isCollapsed = (activeFocus == "top") || isMapGestureActive,
+            isMapGestureActive = isMapGestureActive,
             onToggleCollapse = {
                 activeFocus = if (activeFocus == "bottom") null else "bottom"
             },
@@ -520,6 +566,7 @@ private fun TripSearchCard(
     uiState: MainUiState,
     viewModel: MainViewModel,
     isCollapsed: Boolean = false,
+    isMapGestureActive: Boolean = false,
     onToggleCollapse: () -> Unit = {},
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
@@ -529,18 +576,23 @@ private fun TripSearchCard(
     var customName by remember { mutableStateOf("") }
     var placeToManage by remember { mutableStateOf<SavedPlace?>(null) }
 
+    val animatedScale by animateFloatAsState(
+        targetValue = if (isMapGestureActive) 0.88f else 1f,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f),
+        label = "searchCardScale"
+    )
+    val animatedAlpha by animateFloatAsState(
+        targetValue = if (isMapGestureActive) 0.35f else 1f,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f),
+        label = "searchCardAlpha"
+    )
+
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .pointerInput(Unit) {
-                detectVerticalDragGestures { _, dragAmount ->
-                    if (dragAmount > 24) {
-                        if (!isCollapsed) onToggleCollapse()
-                    } else if (dragAmount < -24) {
-                        if (isCollapsed) onToggleCollapse()
-                    }
-                }
-            },
+            .scale(animatedScale)
+            .alpha(animatedAlpha)
+            .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
@@ -550,8 +602,13 @@ private fun TripSearchCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .panelDragGestures(
+                        isCollapsed = true,
+                        dragDownToCollapse = false,
+                        onToggleCollapse = onToggleCollapse
+                    )
                     .clickable(onClick = onToggleCollapse)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(Icons.Default.Directions, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
@@ -564,9 +621,22 @@ private fun TripSearchCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                    modifier = Modifier.size(width = 24.dp, height = 3.dp)
+                ) {}
             }
         } else {
-            Column(modifier = Modifier.padding(12.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(12.dp)
+                    .panelDragGestures(
+                        isCollapsed = false,
+                        dragDownToCollapse = false,
+                        onToggleCollapse = onToggleCollapse
+                    )
+            ) {
             if (uiState.tripSearchField != null) {
                 // ---- Arama modu ----
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -771,9 +841,21 @@ private fun TripSearchCard(
                             )
                         }
                     }
+                // Alt Drag Handle (Açıkken yukarı itmek veya tıklayarak kapatmak için zarif tutamaç)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onToggleCollapse)
+                        .padding(top = 8.dp, bottom = 2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                        modifier = Modifier.size(width = 36.dp, height = 4.dp)
+                    ) {}
                 }
             }
-        }
         }
     }
 
@@ -1000,37 +1082,69 @@ private fun TripBottomPanel(
     viewModel: MainViewModel,
     favoritesManager: FavoritesManager,
     isCollapsed: Boolean = false,
+    isMapGestureActive: Boolean = false,
     onToggleCollapse: () -> Unit = {},
     onStartJourney: (Double, Double, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val animatedScale by animateFloatAsState(
+        targetValue = if (isMapGestureActive) 0.88f else 1f,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f),
+        label = "bottomPanelScale"
+    )
+    val animatedAlpha by animateFloatAsState(
+        targetValue = if (isMapGestureActive) 0.35f else 1f,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f),
+        label = "bottomPanelAlpha"
+    )
+
     Column(modifier = modifier.fillMaxWidth()) {
         if (uiState.tripPlans.isNotEmpty() || uiState.isTripPlanning || uiState.errorMessage != null) {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(10.dp)
-                    .pointerInput(Unit) {
-                        detectVerticalDragGestures { _, dragAmount ->
-                            if (dragAmount > 24) {
-                                if (!isCollapsed) onToggleCollapse()
-                            } else if (dragAmount < -24) {
-                                if (isCollapsed) onToggleCollapse()
-                            }
-                        }
-                    },
+                    .scale(animatedScale)
+                    .alpha(animatedAlpha)
+                    .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))
+                    .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * 0.55f),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
+                // Üst Tutamaç Çubuğu (Drag Handle)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .panelDragGestures(
+                            isCollapsed = isCollapsed,
+                            dragDownToCollapse = true,
+                            onToggleCollapse = onToggleCollapse
+                        )
+                        .clickable(onClick = onToggleCollapse)
+                        .padding(top = 6.dp, bottom = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                        modifier = Modifier.size(width = 36.dp, height = 4.dp)
+                    ) {}
+                }
+
                 if (isCollapsed && uiState.tripPlans.isNotEmpty()) {
                     // Daraltılmış Kompakt Görünüm
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .panelDragGestures(
+                                isCollapsed = true,
+                                dragDownToCollapse = true,
+                                onToggleCollapse = onToggleCollapse
+                            )
                             .clickable(onClick = onToggleCollapse)
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(Icons.Default.AltRoute, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
@@ -1072,7 +1186,16 @@ private fun TripBottomPanel(
                     }
                 } else {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .panelDragGestures(
+                                    isCollapsed = false,
+                                    dragDownToCollapse = true,
+                                    onToggleCollapse = onToggleCollapse
+                                ),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
                                 "Rota Alternatifleri",
                                 fontWeight = FontWeight.Bold,
@@ -2687,62 +2810,82 @@ private fun TripMap(
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
-            MapView(context).also { mv ->
-                onMapViewCreated(mv)
-                mv.onCreate(null)
-                mv.getMapAsync { map ->
-                    map.addOnCameraMoveStartedListener { reason ->
-                        if (reason == org.maplibre.android.maps.MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
-                            currentGestureChanged(true)
-                        }
+            val container = object : android.widget.FrameLayout(context) {
+                override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+                    when (ev.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> currentGestureChanged(true)
+                        android.view.MotionEvent.ACTION_UP,
+                        android.view.MotionEvent.ACTION_CANCEL -> currentGestureChanged(false)
                     }
-                    map.addOnCameraIdleListener {
-                        currentGestureChanged(false)
-                    }
-
-                    map.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
-                        map.cameraPosition = CameraPosition.Builder()
-                            .target(LatLng(40.1832, 29.0647))
-                            .zoom(12.0)
-                            .build()
-                        val layers = MapLayers(map)
-                        layers.setup(
-                            style = style,
-                            busIcon = MapUtils.createBusIcon(),
-                            stopIcon = MapUtils.createStopIcon(),
-                            userIcon = MapUtils.createUserIcon(),
-                            pinAIcon = MapUtils.createPinIcon("A", 0xFF0F9D58.toInt()),
-                            pinBIcon = MapUtils.createPinIcon("B", 0xFFD93025.toInt()),
-                            subtleStopIcon = MapUtils.createSubtleStopIcon()
-                        )
-                        onLayersReady(layers)
-                    }
-
-                    map.addOnMapClickListener { latLng ->
-                        runCatching {
-                            val screenPoint = map.projection.toScreenLocation(latLng)
-                            val features = map.queryRenderedFeatures(
-                                screenPoint, MapLayers.LAYER_BUSES, MapLayers.LAYER_STOPS
-                            )
-                            if (features.isNotEmpty()) {
-                                val f = features.first()
-                                val stopId = f.getNumberProperty("stopId")?.toInt()
-                                val plate = f.getStringProperty("plate")
-                                if (stopId != null && stopId > 0) {
-                                    currentStopTapped(stopId)
-                                } else if (!plate.isNullOrBlank()) {
-                                    currentBusTapped(plate)
-                                }
-                            }
-                        }
-                        true
-                    }
+                    return super.dispatchTouchEvent(ev)
                 }
             }
+            val mv = MapView(context)
+            container.addView(
+                mv,
+                android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+            onMapViewCreated(mv)
+            mv.onCreate(null)
+            mv.getMapAsync { map ->
+                map.addOnCameraMoveStartedListener { reason ->
+                    if (reason == org.maplibre.android.maps.MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                        currentGestureChanged(true)
+                    }
+                }
+                map.addOnCameraIdleListener {
+                    currentGestureChanged(false)
+                }
+
+                map.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
+                    map.cameraPosition = CameraPosition.Builder()
+                        .target(LatLng(40.1832, 29.0647))
+                        .zoom(12.0)
+                        .build()
+                    val layers = MapLayers(map)
+                    layers.setup(
+                        style = style,
+                        busIcon = MapUtils.createBusIcon(),
+                        stopIcon = MapUtils.createStopIcon(),
+                        userIcon = MapUtils.createUserIcon(),
+                        pinAIcon = MapUtils.createPinIcon("A", 0xFF0F9D58.toInt()),
+                        pinBIcon = MapUtils.createPinIcon("B", 0xFFD93025.toInt()),
+                        subtleStopIcon = MapUtils.createSubtleStopIcon()
+                    )
+                    onLayersReady(layers)
+                }
+
+                map.addOnMapClickListener { latLng ->
+                    runCatching {
+                        val screenPoint = map.projection.toScreenLocation(latLng)
+                        val features = map.queryRenderedFeatures(
+                            screenPoint, MapLayers.LAYER_BUSES, MapLayers.LAYER_STOPS
+                        )
+                        if (features.isNotEmpty()) {
+                            val f = features.first()
+                            val stopId = f.getNumberProperty("stopId")?.toInt()
+                            val plate = f.getStringProperty("plate")
+                            if (stopId != null && stopId > 0) {
+                                currentStopTapped(stopId)
+                            } else if (!plate.isNullOrBlank()) {
+                                currentBusTapped(plate)
+                            }
+                        }
+                    }
+                    true
+                }
+            }
+            container
         },
-        onRelease = {
-            runCatching { it.onStop() }
-            runCatching { it.onDestroy() }
+        onRelease = { container ->
+            val mv = container.getChildAt(0) as? MapView
+            mv?.let {
+                runCatching { it.onStop() }
+                runCatching { it.onDestroy() }
+            }
         }
     )
 }
