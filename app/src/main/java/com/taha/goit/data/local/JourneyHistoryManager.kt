@@ -42,4 +42,42 @@ class JourneyHistoryManager(context: Context) {
     fun clear() {
         prefs.edit().remove("journey_history").apply()
     }
+
+    fun recordDestinationVisit(name: String, lat: Double, lng: Double) {
+        if (name.isBlank()) return
+        val raw = prefs.getString("trip_visit_counts", null)
+        val list = if (raw != null) {
+            runCatching { json.decodeFromString<List<VisitedPlace>>(raw) }.getOrDefault(emptyList()).toMutableList()
+        } else {
+            mutableListOf()
+        }
+
+        val idx = list.indexOfFirst {
+            it.name.equals(name, ignoreCase = true) ||
+            (Math.abs(it.lat - lat) < 0.001 && Math.abs(it.lng - lng) < 0.001)
+        }
+
+        if (idx >= 0) {
+            val existing = list[idx]
+            list[idx] = existing.copy(name = name, lat = lat, lng = lng, count = existing.count + 1)
+        } else {
+            list.add(VisitedPlace(name = name, lat = lat, lng = lng, count = 1))
+        }
+
+        prefs.edit().putString("trip_visit_counts", json.encodeToString(list)).apply()
+    }
+
+    fun getMostVisited(limit: Int = 5): List<VisitedPlace> {
+        val raw = prefs.getString("trip_visit_counts", null) ?: return emptyList()
+        val list = runCatching { json.decodeFromString<List<VisitedPlace>>(raw) }.getOrDefault(emptyList())
+        return list.sortedByDescending { it.count }.take(limit)
+    }
 }
+
+@Serializable
+data class VisitedPlace(
+    val name: String,
+    val lat: Double,
+    val lng: Double,
+    val count: Int
+)

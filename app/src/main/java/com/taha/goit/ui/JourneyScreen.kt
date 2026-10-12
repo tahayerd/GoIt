@@ -22,17 +22,23 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.taha.goit.service.JourneyTracker
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+
 /**
- * Canlı Yolculuk Rehberi (Overlay — V1.5.0):
+ * Canlı Yolculuk Rehberi (Overlay — V1.6.0):
  * - Otomatik aşama geçişleri (yürüyüş, bekleme, araç, iniş, varış)
  * - Beklemede: hattın durağa varışına kalan dakika
  * - Yürümede: hedefe/durağa kalan mesafe ve dakika
  * - Araçta: kalan dakika hesabı, geçilen duraklar, sıradaki durak, kalan duraklar
+ * - Harita jestinde hafif daralma (scale 0.92, alpha 0.85)
  * - Saf Material Icons, sıfır emoji, AMOLED uyumlu
  */
 @Composable
 fun JourneyScreen(
     onStopJourney: () -> Unit,
+    isMapGestureActive: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val state by JourneyTracker.state.collectAsState()
@@ -43,6 +49,15 @@ fun JourneyScreen(
     val isAlightImminent = runtime.stageType == "ride" &&
         (runtime.stopsRemaining ?: 99) <= 1
 
+    val animatedScale by animateFloatAsState(
+        targetValue = if (isMapGestureActive) 0.92f else 1f,
+        label = "hudScale"
+    )
+    val animatedAlpha by animateFloatAsState(
+        targetValue = if (isMapGestureActive) 0.85f else 1f,
+        label = "hudAlpha"
+    )
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -50,7 +65,10 @@ fun JourneyScreen(
         contentAlignment = Alignment.BottomCenter
     ) {
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .scale(animatedScale)
+                .alpha(animatedAlpha),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(
                 containerColor = if (isAlightImminent) {

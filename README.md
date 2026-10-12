@@ -40,10 +40,20 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 ### İlk Açılış Rehberi (Onboarding)
 - 5-step interactive tour explaining tabs, features, and managing location & notification permissions (clean professional UI).
 
+### v1.6.0 Highlights
+- **Offline Schedule Pipeline & Cache:** Daily automated timetable crawl (`schedule-data` rolling release) combined with on-device chunked offline caching (128 buckets, 24h background sync on Wi-Fi). Completely resolves timetable gaps and missing schedule data.
+- **Road-Snapped Routes & OSRM Foot Routing:** Real street-following foot legs via FOSSGIS foot routing, clipped bus polyline shapes (`routecoordinate`), and directional snap-to-polyline vehicle rendering.
+- **Expandable Bus Detail Panel:** Tap any route alternative to expand an interactive two-column view featuring a vertical stop timeline with live bus positioning, fare calculation based on selected passenger type (`TAM`, `İNDİRİMLİ`, `ÖĞRENCİ`), upcoming departures list, and estimated arrival time.
+- **Continuous Refined Location:** Low-overhead continuous GPS location tracking with a redesigned, elegant multi-ring location marker.
+- **Gesture-Driven UI & Spring Tab Transitions:** Vertical drag and tap support for collapsible cards, automatic panel minimization on map pan/zoom, and fluid spring-animated tab swipes across designated panels.
+- **Dual-Tone Route Visualization:** Dual-tone route styling (pastel baseline, vibrant passed path, muted remaining segment) with subtle stop indicators.
+- **Compact Origin/Destination Picker:** Single-line search bar with quick current location shortcut and most-visited destination chips.
+- **Stable Keystore Signing:** Reproducible fixed debug keystore in CI matching the local development key (`SHA-1: DE:D8:68:61:54:FC:2C:C0:C1:70:B8:7B:B5:F3:D6:A0:C7:5A:B2:07`), enabling seamless direct updates without uninstalling.
+
 ## Privacy
 - Zero analytics, ads, or tracker SDKs.
 - Transit data comes directly from Burulaş/Bursakart public REST endpoints.
-- The only optional external lookup is Nominatim (OSM) for venues missing from the local database.
+- The only optional external lookups are Nominatim (OSM) for venues missing from the local database and FOSSGIS for foot routing.
 
 ## Architecture
 - **Platform:** Android Native (Kotlin + Jetpack Compose)
@@ -60,4 +70,3 @@ APKs are built in CI only. Push to `master` (or run the workflow manually) and G
 - [ ] Timetable-based departure planning ("Şu saatte var / kalk").
 - [ ] Favorite stop approach notifications (`ApproachWatchService`).
 - [ ] Home screen widget for quick stop arrivals (`GoItWidgetProvider`).
-- [ ] Offline schedule lookup without network ping.

@@ -22,13 +22,16 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
+    private var stopLocationUpdates: (() -> Unit)? = null
+
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
         if (LocationHelper.hasPermission(this)) {
+            startLocationTracking()
             lifecycleScope.launch {
                 val loc = LocationHelper.getFreshLocation(this@MainActivity)
-                if (loc != null) viewModel.loadNearby(loc.latitude, loc.longitude)
+                if (loc != null) viewModel.updateUserLocation(loc.latitude, loc.longitude)
             }
         }
     }
@@ -47,6 +50,14 @@ class MainActivity : ComponentActivity() {
         viewModel.setPlacesManager(app.savedPlacesManager)
         viewModel.setJourneyHistoryManager(app.journeyHistoryManager)
         viewModel.setSettingsManager(app.settingsManager)
+        viewModel.setScheduleCache(app.scheduleCache)
+        viewModel.setOsrmRouter(app.osrmRouter)
+
+        // İlk açılışta hızlı son konum
+        val lastLoc = LocationHelper.getLastKnownLocation(this)
+        if (lastLoc != null) {
+            viewModel.updateUserLocation(lastLoc.latitude, lastLoc.longitude)
+        }
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
@@ -94,6 +105,26 @@ class MainActivity : ComponentActivity() {
             val parsed = MapsLinkParser.parse(rawText)
             if (parsed != null) {
                 viewModel.setDestinationFromExternal(parsed.lat, parsed.lng, parsed.label)
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        startLocationTracking()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        stopLocationUpdates?.invoke()
+        stopLocationUpdates = null
+    }
+
+    private fun startLocationTracking() {
+        if (LocationHelper.hasPermission(this)) {
+            stopLocationUpdates?.invoke()
+            stopLocationUpdates = LocationHelper.startContinuousLocationUpdates(this) { loc ->
+                viewModel.updateUserLocation(loc.latitude, loc.longitude)
             }
         }
     }

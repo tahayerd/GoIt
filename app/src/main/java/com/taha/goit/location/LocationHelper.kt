@@ -97,4 +97,42 @@ object LocationHelper {
         }
         return fresh ?: getLastKnownLocation(context)
     }
+
+    /**
+     * Ön plandayken düzenli konum dinleme (~5 sn / 10 m).
+     * Dönen lambda dinlemeyi durdurur (onStop / onDispose çağrısı için).
+     */
+    fun startContinuousLocationUpdates(
+        context: Context,
+        minTimeMs: Long = 5000L,
+        minDistanceM: Float = 10f,
+        onLocation: (Location) -> Unit
+    ): () -> Unit {
+        if (!hasPermission(context)) return {}
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return {}
+
+        val listener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                onLocation(location)
+            }
+            @Deprecated("Deprecated in Java")
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+            override fun onProviderEnabled(provider: String) {}
+            override fun onProviderDisabled(provider: String) {}
+        }
+
+        try {
+            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, minTimeMs, minDistanceM, listener)
+            }
+            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, minTimeMs, minDistanceM, listener)
+            }
+        } catch (_: SecurityException) {
+        } catch (_: Exception) {}
+
+        return {
+            runCatching { lm.removeUpdates(listener) }
+        }
+    }
 }

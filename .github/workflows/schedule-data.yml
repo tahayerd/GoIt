@@ -1,4 +1,4 @@
-name: Update Schedule Data
+name: Crawl Schedule Data
 
 on:
   schedule:
@@ -15,25 +15,33 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Crawl bus schedules
+      - name: Run schedule crawl
         run: |
-          python3 tools/crawl_schedule.py schedule-v1.json.gz
+          python3 tools/crawl_schedule.py
 
-      - name: Release schedule data bundle
+      - name: Upload schedule-v1.json.gz artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: schedule-v1-data
+          path: schedule-v1.json.gz
+          if-no-files-found: error
+
+      - name: Publish rolling schedule-data release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: schedule-data
-          name: "GoIt Schedule Data (Automated)"
+          name: "Bursa Transit Schedule Data (Daily Crawl)"
           prerelease: true
           files: schedule-v1.json.gz
           body: |
-            Automated Bursakart bus timetable bundle generated for GoIt offline cache.
+            Automated daily timetable crawl for GoIt offline schedule lookup.
+            Generated from Burulas ScheduleByRoute API.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

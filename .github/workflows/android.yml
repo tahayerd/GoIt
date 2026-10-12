@@ -14,10 +14,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
@@ -33,36 +33,28 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Prepare Fixed Signing Keystore
+      - name: Prepare signing keystore
         env:
           KS_B64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$KS_B64" ]; then
-            mkdir -p /tmp/ks
-            echo "$KS_B64" | base64 -d > /tmp/ks/debug.keystore
-            echo "Fixed keystore decoded successfully."
-          else
-            echo "Warning: DEBUG_KEYSTORE_BASE64 not set, falling back to default debug keystore"
-          fi
+          mkdir -p /tmp/ks
+          echo "$KS_B64" | base64 -d > /tmp/ks/debug.keystore
 
-      - name: Build Debug APK
+      - name: Build debug APK
         env:
           GOIT_KEYSTORE_PATH: /tmp/ks/debug.keystore
         run: ./gradlew assembleDebug --no-daemon --stacktrace
-
-      - name: Verify APK Signature SHA-1
-        run: |
-          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-          if [ -f "$APK_PATH" ]; then
-            echo "Verifying APK signature..."
-            apksigner verify --print-certs "$APK_PATH" || true
-          fi
 
       - name: Verify 16 KB page-size alignment
         run: |
           BT=$(ls -d $ANDROID_HOME/build-tools/35.0.0 | head -1)
           echo "Using build-tools: $BT"
           "$BT/zipalign" -c -P 16 -v 4 app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Verify keystore signature
+        run: |
+          BT=$(ls -d $ANDROID_HOME/build-tools/35.0.0 | head -1)
+          "$BT/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -i "DE:D8:68:61:54:FC:2C:C0:C1:70:B8:7B:B5:F3:D6:A0:C7:5A:B2:07"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -80,13 +72,16 @@ jobs:
           prerelease: true
           files: app/build/outputs/apk/debug/app-debug.apk
           body: |
-            GoIt Bursa Transit v1.5.0
+            GoIt Bursa Transit v1.6.0
 
-            - Trip Tab Focus & Auto-Collapse: tapping search collapses route alternatives; tapping alternatives collapses search to single-line summary
-            - Right-Aligned Route Alternative ETAs: all routes show estimated arrival countdown on the right (live GPS or scheduled timetable fallback)
-            - Clean Journey Mode Layout: search card and alternatives automatically hide when journey begins; HUD fits seamlessly above navigation bar
-            - Comprehensive Live HUD: live bus arrival countdown while waiting, expandable route stop list (passed/current/upcoming) with time-to-destination estimation, walk distance & minutes
-            - Pure AMOLED Dark Theme: true #000000 background option in Settings for battery savings and high contrast
-            - Clean Professional UI: all emojis replaced with sharp Material Design icons
+            - Schedule Data Pipeline: daily CI timetable crawl + offline on-device chunked schedule cache
+            - Road-Snapped Bus & Walking Routes: snap-to-polyline for live buses, clipped route shapes for planned bus legs, OSRM foot routing for walking legs
+            - Expandable Bus Detail: comprehensive stop progression timeline, fare selection (Standard/Discount/Student), upcoming runs list, estimated arrival time
+            - Continuous Refined Location: smooth live user location marker with white ring & soft drop shadow, battery-efficient lifecycle observer
+            - Enhanced Panel Gestures: vertical drag to expand/collapse, clean headers, auto-collapse on map drag gestures with instant restoration
+            - Fluid Tab Switching: spring-animated tab swipes across designated panels and navigation bar
+            - Dual-Tone Route Visualization: pastel full line overview, solid traveled segment, muted remaining segment
+            - Compact Origin/Destination Picker: single-line inputs with location shortcut, saved places and frequently visited chips
+            - Stable Signing: signed with reproducible fixed keystore for seamless version upgrades without uninstallation
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

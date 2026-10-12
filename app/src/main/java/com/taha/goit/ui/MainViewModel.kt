@@ -3,6 +3,7 @@ package com.taha.goit.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.taha.goit.data.api.NominatimGeocoder
+import com.taha.goit.data.api.OsrmRouter
 import com.taha.goit.data.api.TransitRepository
 import com.taha.goit.data.local.FavoriteItem
 import com.taha.goit.data.local.FavoritesManager
@@ -12,8 +13,12 @@ import com.taha.goit.data.local.JourneyHistoryEntry
 import com.taha.goit.data.local.JourneyHistoryManager
 import com.taha.goit.data.local.SavedPlace
 import com.taha.goit.data.local.SavedPlacesManager
+import com.taha.goit.data.local.ScheduleCache
 import com.taha.goit.data.local.SettingsManager
 import com.taha.goit.data.local.StationDatabase
+import com.taha.goit.data.local.VisitedPlace
+import com.taha.goit.data.local.getBurulasWeekDay
+import com.taha.goit.data.local.normalizeRouteCode
 import com.taha.goit.data.model.*
 import com.taha.goit.service.JourneyPayload
 import com.taha.goit.service.JourneyStage
@@ -21,6 +26,7 @@ import com.taha.goit.service.JourneyStop
 import com.taha.goit.util.MapsLinkParser
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.maplibre.android.geometry.LatLng
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -127,7 +133,17 @@ data class MainUiState(
     val walkAccessMeters: Int = 800,
     val walkTransferMeters: Int = 400,
     val favoriteAlertsEnabled: Boolean = false,
-    val themeMode: String = "system" // "system" | "light" | "dark" | "amoled"
+    val themeMode: String = "system", // "system" | "light" | "dark" | "amoled"
+    // v1.6.0: Detaylı Rota & Tarife & Yollara Oturtma
+    val fareType: String = "TAM", // "TAM" | "İNDİRİMLİ" | "ÖĞRENCİ"
+    val mostVisitedPlaces: List<VisitedPlace> = emptyList(),
+    val selectedPlanLiveBus: BusRealtimeLocation? = null,
+    val selectedPlanUpcomingRuns: List<String> = emptyList(),
+    val selectedPlanEstimatedArrival: String? = null,
+    val planBusLegShapes: Map<Int, List<LatLng>> = emptyMap(),
+    val planWalkLegShapes: Map<Int, List<LatLng>> = emptyMap(),
+    val isUpdatingSchedule: Boolean = false,
+    val scheduleLastUpdateText: String = ""
 )
 
 class MainViewModel : ViewModel() {
@@ -168,7 +184,10 @@ class MainViewModel : ViewModel() {
 
     fun setJourneyHistoryManager(manager: JourneyHistoryManager) {
         journeyHistoryManager = manager
-        _uiState.value = _uiState.value.copy(journeyHistory = manager.getHistory())
+        _uiState.value = _uiState.value.copy(
+            journeyHistory = manager.getHistory(),
+            mostVisitedPlaces = manager.getMostVisited(5)
+        )
     }
 
     fun setSettingsManager(manager: SettingsManager) {
@@ -177,8 +196,49 @@ class MainViewModel : ViewModel() {
             walkAccessMeters = manager.walkAccessMeters,
             walkTransferMeters = manager.walkTransferMeters,
             favoriteAlertsEnabled = manager.favoriteAlertsEnabled,
-            themeMode = manager.themeMode
+            themeMode = manager.themeMode,
+            fareType = manager.fareType
         )
+    }
+
+    fun setScheduleCache(cache: ScheduleCache) {
+        scheduleCache = cache
+        refreshScheduleStatus()
+        viewModelScope.launch {
+            cache.checkAndUpdateSchedule(force = false)
+            refreshScheduleStatus()
+        }
+    }
+
+    fun setOsrmRouter(router: OsrmRouter) {
+        osrmRouter = router
+    }
+
+    fun updateFareType(type: String) {
+        settingsManager?.fareType = type
+        _uiState.value = _uiState.value.copy(fareType = type)
+    }
+
+    fun refreshScheduleStatus() {
+        val cache = scheduleCache ?: return
+        val ts = cache.getLastUpdateTimestamp()
+        val text = if (ts > 0L) {
+            val sdf = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale("tr", "TR"))
+            "Son güncelleme: ${sdf.format(java.util.Date(ts))}"
+        } else {
+            "Henüz indirilmedi (çevrimiçi kullanılır)"
+        }
+        _uiState.value = _uiState.value.copy(scheduleLastUpdateText = text)
+    }
+
+    fun updateScheduleData(force: Boolean = true) {
+        val cache = scheduleCache ?: return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isUpdatingSchedule = true)
+            val ok = cache.checkAndUpdateSchedule(force = force)
+            refreshScheduleStatus()
+            _uiState.value = _uiState.value.copy(isUpdatingSchedule = false)
+        }
     }
 
     fun updateThemeMode(mode: String) {
@@ -284,6 +344,29 @@ class MainViewModel : ViewModel() {
 
     private fun refreshRecent() {
         _uiState.value = _uiState.value.copy(recentRoutes = historyManager?.getRecent() ?: emptyList())
+    }
+
+    private var lastNearbyLat: Double? = null
+    private var lastNearbyLng: Double? = null
+
+    /**
+     * Madde 4: Sürekli konum güncellemeleri.
+     * Marker her fix'te yumuşak güncellenir; API sorguları (loadNearby)
+     * yalnızca anlamlı hareket (>25 m) olduğunda tetiklenir.
+     */
+    fun updateUserLocation(lat: Double, lng: Double) {
+        _uiState.value = _uiState.value.copy(
+            userLat = lat,
+            userLng = lng,
+            locationAvailable = true
+        )
+        val lLat = lastNearbyLat
+        val lLng = lastNearbyLng
+        if (lLat == null || lLng == null || TransitRepository.calculateDistanceMeters(lat, lng, lLat, lLng) > 25.0) {
+            lastNearbyLat = lat
+            lastNearbyLng = lng
+            loadNearby(lat, lng)
+        }
     }
 
     // ---------- Yakındaki Duraklar ----------
@@ -479,16 +562,11 @@ class MainViewModel : ViewModel() {
             return
         }
         val stopId = state.selectedStop?.stopId ?: return
-        val cal = java.util.Calendar.getInstance()
-        val calDow = cal.get(java.util.Calendar.DAY_OF_WEEK)
-        // API günleri: Pazartesi=1 ... Pazar=7 (Calendar: Pazar=1, Pazartesi=2 ... Cumartesi=7)
-        val weekDay = when (calDow) {
-            java.util.Calendar.SUNDAY -> 7
-            else -> calDow - 1
-        }
+        val weekDay = getBurulasWeekDay()
         _uiState.value = state.copy(showSchedule = true, stopSchedule = emptyList())
         viewModelScope.launch {
-            val schedule = repository.getStopSchedule(stopId, weekDay)
+            val cached = scheduleCache?.getSchedule(stopId, weekDay)
+            val schedule = if (!cached.isNullOrEmpty()) cached else repository.getStopSchedule(stopId, weekDay)
             _uiState.value = _uiState.value.copy(stopSchedule = schedule)
         }
     }
@@ -682,7 +760,11 @@ class MainViewModel : ViewModel() {
                             ts = System.currentTimeMillis()
                         )
                     )
-                    _uiState.value = _uiState.value.copy(journeyHistory = mgr.getHistory())
+                    mgr.recordDestinationVisit(d.name, d.lat, d.lng)
+                    _uiState.value = _uiState.value.copy(
+                        journeyHistory = mgr.getHistory(),
+                        mostVisitedPlaces = mgr.getMostVisited(5)
+                    )
                 }
                 startPlanEtaLoop()
             } else {
@@ -691,13 +773,246 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    /** Plan seçildiğinde: sadece seçilen plan haritada çizilir, güzergah koordinatları getirilir. */
+    /**
+     * Madde 3 & Madde 2: Plan seçildiğinde:
+     * - Bacakların gerçek yol geometrileri yüklenir (bus shape kırpma + OSRM foot)
+     * - Canlı araç aranır ve eşlenir
+     * - Sonraki kalkış saatleri (dakika listesi) hesaplanır
+     * - Hedefe tahmini varış saati (HH:mm) hesaplanır
+     */
     fun selectRouteFromPlan(plan: RoutePlan) {
         _uiState.value = _uiState.value.copy(
             selectedPlan = plan,
             selectedRouteCode = null,
-            selectedStop = null
+            selectedStop = null,
+            selectedPlanLiveBus = null,
+            selectedPlanUpcomingRuns = emptyList(),
+            selectedPlanEstimatedArrival = null
         )
+        loadPlanLegShapes(plan)
+        loadPlanDetailData(plan)
+    }
+
+    fun deselectPlan() {
+        _uiState.value = _uiState.value.copy(
+            selectedPlan = null,
+            selectedPlanLiveBus = null,
+            selectedPlanUpcomingRuns = emptyList(),
+            selectedPlanEstimatedArrival = null,
+            routePrice = emptyList(),
+            planBusLegShapes = emptyMap(),
+            planWalkLegShapes = emptyMap()
+        )
+    }
+
+    private fun loadPlanLegShapes(plan: RoutePlan) {
+        viewModelScope.launch {
+            val busShapes = mutableMapOf<Int, List<LatLng>>()
+            val walkShapes = mutableMapOf<Int, List<LatLng>>()
+
+            for ((idx, leg) in plan.legs.withIndex()) {
+                if (leg.kind == "bus") {
+                    val code = leg.routeCode ?: ""
+                    val hatNo = leg.routeNo ?: RouteCatalog.findByCode(code)?.hatNo
+                    if (hatNo != null) {
+                        try {
+                            val coords = repository.getRouteCoordinates(hatNo.toString())
+                            val clipped = clipRouteCoordinatesToLeg(coords, leg.direction, leg.boardStop, leg.alightStop)
+                            if (clipped.isNotEmpty()) {
+                                busShapes[idx] = clipped
+                            }
+                        } catch (_: Exception) {}
+                    }
+                } else if (leg.kind == "walk") {
+                    val (p1, p2) = getWalkEndpoints(plan, idx)
+                    if (p1 != null && p2 != null) {
+                        val footPath = osrmRouter?.footRoute(p1.first, p1.second, p2.first, p2.second)
+                        if (footPath != null && footPath.isNotEmpty()) {
+                            walkShapes[idx] = footPath
+                        }
+                    }
+                }
+            }
+
+            _uiState.value = _uiState.value.copy(
+                planBusLegShapes = busShapes,
+                planWalkLegShapes = walkShapes
+            )
+        }
+    }
+
+    private fun getWalkEndpoints(plan: RoutePlan, walkIdx: Int): Pair<Pair<Double, Double>?, Pair<Double, Double>?> {
+        val o = _uiState.value.tripOrigin
+        val d = _uiState.value.tripDestination
+        val legs = plan.legs
+        val leg = legs.getOrNull(walkIdx) ?: return null to null
+
+        val p1 = if (walkIdx == 0) {
+            if (o != null) o.lat to o.lng else null
+        } else {
+            val prevLeg = legs.getOrNull(walkIdx - 1)
+            val stop = prevLeg?.alightStop
+            val la = stop?.latitude?.toDoubleOrNull()
+            val lo = stop?.longitude?.toDoubleOrNull()
+            if (la != null && lo != null) la to lo else null
+        }
+
+        val p2 = when {
+            leg.boardStop != null -> {
+                val la = leg.boardStop.latitude?.toDoubleOrNull()
+                val lo = leg.boardStop.longitude?.toDoubleOrNull()
+                if (la != null && lo != null) la to lo else null
+            }
+            leg.alightStop != null -> {
+                val la = leg.alightStop.latitude?.toDoubleOrNull()
+                val lo = leg.alightStop.longitude?.toDoubleOrNull()
+                if (la != null && lo != null) la to lo else null
+            }
+            else -> if (d != null) d.lat to d.lng else null
+        }
+
+        return p1 to p2
+    }
+
+    private fun clipRouteCoordinatesToLeg(
+        coords: List<RouteCoordinate>,
+        direction: String?,
+        boardStop: RouteStop?,
+        alightStop: RouteStop?
+    ): List<LatLng> {
+        if (coords.isEmpty()) return emptyList()
+        val filtered = if (!direction.isNullOrBlank()) {
+            coords.filter { it.routeDirection == direction }
+        } else coords
+
+        val sorted = (if (filtered.isNotEmpty()) filtered else coords).sortedBy { it.sequence }
+        val points = sorted.mapNotNull { c ->
+            val la = c.latitude?.toDoubleOrNull() ?: return@mapNotNull null
+            val lo = c.logitude?.toDoubleOrNull() ?: return@mapNotNull null
+            LatLng(la, lo)
+        }
+        if (points.size < 2) return points
+
+        val bLat = boardStop?.latitude?.toDoubleOrNull()
+        val bLng = boardStop?.longitude?.toDoubleOrNull()
+        val aLat = alightStop?.latitude?.toDoubleOrNull()
+        val aLng = alightStop?.longitude?.toDoubleOrNull()
+
+        if (bLat == null || bLng == null || aLat == null || aLng == null) {
+            return points
+        }
+
+        var bestStartIdx = 0
+        var bestStartDist = Double.MAX_VALUE
+        var bestEndIdx = points.size - 1
+        var bestEndDist = Double.MAX_VALUE
+
+        for (i in points.indices) {
+            val p = points[i]
+            val dStart = (p.latitude - bLat) * (p.latitude - bLat) + (p.longitude - bLng) * (p.longitude - bLng)
+            if (dStart < bestStartDist) {
+                bestStartDist = dStart
+                bestStartIdx = i
+            }
+            val dEnd = (p.latitude - aLat) * (p.latitude - aLat) + (p.longitude - aLng) * (p.longitude - aLng)
+            if (dEnd < bestEndDist) {
+                bestEndDist = dEnd
+                bestEndIdx = i
+            }
+        }
+
+        return if (bestStartIdx <= bestEndIdx) {
+            points.subList(bestStartIdx, bestEndIdx + 1)
+        } else {
+            points.subList(bestEndIdx, bestStartIdx + 1).reversed()
+        }
+    }
+
+    private fun loadPlanDetailData(plan: RoutePlan) {
+        viewModelScope.launch {
+            val firstBusLeg = plan.legs.firstOrNull { it.kind == "bus" }
+            val code = firstBusLeg?.routeCode
+            val boardStop = firstBusLeg?.boardStop
+            val bLat = boardStop?.latitude?.toDoubleOrNull()
+            val bLng = boardStop?.longitude?.toDoubleOrNull()
+
+            // 1. Canlı araç eşleme
+            var liveBus: BusRealtimeLocation? = null
+            if (!code.isNullOrBlank() && bLat != null && bLng != null) {
+                try {
+                    val buses = repository.getRealtimeBuses(code)
+                    val matching = if (!firstBusLeg.direction.isNullOrBlank()) {
+                        buses.filter { it.istikamet == firstBusLeg.direction }
+                    } else buses
+
+                    liveBus = matching.minByOrNull { bus ->
+                        val la = bus.enlem ?: 0.0
+                        val lo = bus.boylam ?: 0.0
+                        TransitRepository.calculateDistanceMeters(bLat, bLng, la, lo)
+                    }
+                } catch (_: Exception) {}
+            }
+
+            if (!code.isNullOrBlank()) {
+                try {
+                    val price = repository.getRoutePriceCached(code)
+                    _uiState.value = _uiState.value.copy(routePrice = price)
+                } catch (_: Exception) {}
+            }
+
+            // 2. Sonraki kalkışlar (dakika listesi)
+            val upcomingRuns = mutableListOf<String>()
+            val cal = java.util.Calendar.getInstance()
+            val nowMinutes = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+            val weekDay = getBurulasWeekDay()
+
+            if (boardStop?.stopId != null && !code.isNullOrBlank()) {
+                val normCode = normalizeRouteCode(code)
+                val schedule = scheduleCache?.getSchedule(boardStop.stopId, weekDay)
+                    ?: repository.getStopSchedule(boardStop.stopId, weekDay)
+                val routeSchedule = schedule.filter { normalizeRouteCode(it.routeCode ?: "") == normCode }
+
+                val futureRuns = routeSchedule.mapNotNull { item ->
+                    val timeStr = item.stopTime ?: return@mapNotNull null
+                    val parts = timeStr.split(":")
+                    val h = parts.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+                    val m = parts.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
+                    val totalMin = h * 60 + m
+                    totalMin to timeStr
+                }.filter { it.first >= nowMinutes }
+                    .sortedBy { it.first }
+
+                for ((runMin, _) in futureRuns.take(4)) {
+                    val diff = runMin - nowMinutes
+                    upcomingRuns.add("$diff dk")
+                }
+            }
+
+            // 3. Hedefe tahmini varış saati (HH:mm)
+            var waitMinutes = 5
+            val stopKey = "${boardStop?.stopId}:${code}"
+            val etaStr = _uiState.value.planEtas[stopKey]
+            if (etaStr != null) {
+                val digits = etaStr.filter { it.isDigit() }.toIntOrNull()
+                if (digits != null) waitMinutes = digits
+            } else if (upcomingRuns.isNotEmpty()) {
+                val firstUpcoming = upcomingRuns.first().filter { it.isDigit() }.toIntOrNull()
+                if (firstUpcoming != null) waitMinutes = firstUpcoming
+            }
+
+            val totalDurationMin = waitMinutes + plan.estimatedDurationMinutes
+            val arrivalCal = java.util.Calendar.getInstance()
+            arrivalCal.add(java.util.Calendar.MINUTE, totalDurationMin)
+            val arrivalH = String.format(java.util.Locale.ROOT, "%02d", arrivalCal.get(java.util.Calendar.HOUR_OF_DAY))
+            val arrivalM = String.format(java.util.Locale.ROOT, "%02d", arrivalCal.get(java.util.Calendar.MINUTE))
+            val arrivalText = "Hedefe Tahmini Varış: $arrivalH:$arrivalM"
+
+            _uiState.value = _uiState.value.copy(
+                selectedPlanLiveBus = liveBus,
+                selectedPlanUpcomingRuns = upcomingRuns,
+                selectedPlanEstimatedArrival = arrivalText
+            )
+        }
     }
 
     /** Seçili planı canlı yolculuk yöneticisi (JourneyService) için aşamalandırılmış JSON payload'a çevirir. */
@@ -967,17 +1282,13 @@ class MainViewModel : ViewModel() {
 
                 val newMap = mutableMapOf<String, String>()
                 val cal = java.util.Calendar.getInstance()
-                val calDow = cal.get(java.util.Calendar.DAY_OF_WEEK)
-                val currentWeekDay = when (calDow) {
-                    java.util.Calendar.SATURDAY -> 2
-                    java.util.Calendar.SUNDAY -> 3
-                    else -> 1
-                }
+                val currentWeekDay = getBurulasWeekDay(cal)
                 val nowMinutes = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
 
                 for ((sId, code) in uniquePairs) {
+                    val normCode = normalizeRouteCode(code)
                     val list = etasByStop[sId] ?: emptyList()
-                    val match = list.firstOrNull { it.routeCode.equals(code, ignoreCase = true) }
+                    val match = list.firstOrNull { normalizeRouteCode(it.routeCode ?: "") == normCode }
                     val raw = match?.realTime ?: match?.passTime
                     var etaStr: String? = null
                     if (!raw.isNullOrBlank()) {
@@ -988,10 +1299,16 @@ class MainViewModel : ViewModel() {
                         newMap["$sId:$code"] = "~$etaStr"
                     } else {
                         // Canlı GPS yoksa veya araç henüz hatta çıkmadıysa:
-                        // Tarife (Schedule) tablosundan sonraki kalkış saatini bul ve tahmin et
+                        // 1) Önce offline ScheduleCache paketine bak
+                        // 2) Yoksa tek-durak API isteğine düş
                         try {
-                            val schedule = repository.getStopSchedule(sId, currentWeekDay)
-                            val routeSchedule = schedule.filter { it.routeCode.equals(code, ignoreCase = true) }
+                            val cachedSchedule = scheduleCache?.getSchedule(sId, currentWeekDay)
+                            val schedule = if (!cachedSchedule.isNullOrEmpty()) {
+                                cachedSchedule
+                            } else {
+                                repository.getStopSchedule(sId, currentWeekDay)
+                            }
+                            val routeSchedule = schedule.filter { normalizeRouteCode(it.routeCode ?: "") == normCode }
                             // stopTime formatı "HH:mm" veya "HH:mm:ss"
                             val futureRuns = routeSchedule.mapNotNull { item ->
                                 val timeStr = item.stopTime ?: return@mapNotNull null
@@ -1013,7 +1330,7 @@ class MainViewModel : ViewModel() {
                                 if (firstRun != null) {
                                     newMap["$sId:$code"] = "İlk: ${firstRun.take(5)}"
                                 } else {
-                                    newMap["$sId:$code"] = "Sefer planı bekleniyor"
+                                    newMap["$sId:$code"] = "Planlı"
                                 }
                             }
                         } catch (_: Exception) {

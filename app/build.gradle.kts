@@ -12,8 +12,8 @@ android {
         applicationId = "com.taha.goit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.5.0"
+        versionCode = 8
+        versionName = "1.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -21,13 +21,19 @@ android {
         }
     }
 
-    buildTypes {
-        debug {
-            val ksPath = System.getenv("GOIT_KEYSTORE_PATH")
-            if (!ksPath.isNullOrBlank() && file(ksPath).exists()) {
-                signingConfig = signingConfigs.getByName("releaseSigning")
+    signingConfigs {
+        val ksPath = System.getenv("GOIT_KEYSTORE_PATH")
+        if (!ksPath.isNullOrEmpty() && file(ksPath).exists()) {
+            maybeCreate("debug").apply {
+                storeFile = file(ksPath)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
             }
         }
+    }
+
+    buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -37,6 +43,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

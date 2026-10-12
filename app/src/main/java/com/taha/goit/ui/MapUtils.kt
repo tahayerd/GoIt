@@ -77,30 +77,52 @@ object MapUtils {
         return bmp
     }
 
-    /** Kullanıcının kendi konumu için mavi nokta ikonu. */
+    /** Kullanıcının kendi konumu için estetik beyaz halkalı mavi nokta + gölge ikonu. */
     fun createUserIcon(sizePx: Int = 64): Bitmap {
         val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val center = sizePx / 2f
-        // Dış halka (şeffaf mavi)
+
+        // 1. Dış yarı saydam hale (akıcı genişlik)
         val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0x441A73E8
+            color = 0x2A1A73E8 // ~16% opaklık
             style = Paint.Style.FILL
         }
-        canvas.drawCircle(center, center, center - 4f, haloPaint)
-        // İç nokta
-        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        canvas.drawCircle(center, center, center - 2f, haloPaint)
+
+        // 2. Yumuşak gölgeli beyaz dış çember
+        val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFFFFFFFF.toInt()
+            style = Paint.Style.FILL
+            setShadowLayer(4f, 0f, 2f, 0x40000000)
+        }
+        canvas.drawCircle(center, center, center - 12f, whitePaint)
+
+        // 3. Merkezdeki canlı mavi nokta
+        val bluePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF1A73E8.toInt()
             style = Paint.Style.FILL
         }
-        canvas.drawCircle(center, center, center - 20f, dotPaint)
-        // Beyaz çerçeve
-        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        canvas.drawCircle(center, center, center - 17f, bluePaint)
+
+        return bmp
+    }
+
+    /** Sade, göz yormayan küçük durak nokta ikonu (Madde 7). */
+    fun createSubtleStopIcon(sizePx: Int = 24): Bitmap {
+        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val center = sizePx / 2f
+        val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFFFFFFFF.toInt()
-            style = Paint.Style.STROKE
-            strokeWidth = 4f
+            style = Paint.Style.FILL
         }
-        canvas.drawCircle(center, center, center - 20f, borderPaint)
+        canvas.drawCircle(center, center, center - 2f, whitePaint)
+        val bluePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF1976D2.toInt()
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(center, center, center - 4f, bluePaint)
         return bmp
     }
 

@@ -104,6 +104,46 @@ fun SettingsScreen(
                         }
                     }
 
+                    // Bölüm 2: Bilet Tipi (Madde 3)
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.ConfirmationNumber, null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Bilet Tipi & Ücret", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "Rota detaylarında görüntülenecek Bursakart tarife tipi.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    listOf(
+                                        "TAM" to "Tam",
+                                        "İNDİRİMLİ" to "İndirimli",
+                                        "ÖĞRENCİ" to "Öğrenci"
+                                    ).forEach { (fare, label) ->
+                                        FilterChip(
+                                            selected = uiState.fareType == fare,
+                                            onClick = { viewModel.updateFareType(fare) },
+                                            label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Bölüm 2: Yürüme Mesafesi
                     item {
                         Card(
@@ -244,7 +284,52 @@ fun SettingsScreen(
                         }
                     }
 
-                    // Bölüm 4: Tanıtımı Tekrar Göster
+                    // Bölüm: Çevrimdışı Sefer Tarifeleri (Madde 1)
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.CloudDownload, null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Çevrimdışı Sefer Tarifeleri", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "Bursa genelindeki 7.600+ durağın 7 günlük tarife paketidir. Wi-Fi bağlantısında otomatik yenilenir.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    uiState.scheduleLastUpdateText.ifEmpty { "Henüz indirilmedi (çevrimiçi sorgulanır)" },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                OutlinedButton(
+                                    onClick = { viewModel.updateScheduleData(force = true) },
+                                    enabled = !uiState.isUpdatingSchedule,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    if (uiState.isUpdatingSchedule) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Paket İndiriliyor...")
+                                    } else {
+                                        Icon(Icons.Default.Sync, null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Tarife Verilerini Şimdi Güncelle")
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Bölüm 5: Tanıtımı Tekrar Göster
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -287,7 +372,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    // Bölüm 5: Hakkında
+                    // Bölüm 6: Hakkında
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -301,7 +386,7 @@ fun SettingsScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text("GoIt", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                Text("Sürüm 1.5.0", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                Text("Sürüm 1.6.0", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     "Reklamsız, izleyicisiz Bursa toplu taşıma asistanı.",

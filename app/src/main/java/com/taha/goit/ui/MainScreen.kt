@@ -15,9 +15,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import com.taha.goit.GoItApp
+import com.taha.goit.data.api.TransitRepository
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -138,9 +149,62 @@ fun MainScreen(
         }
     }
 
+    var isMapGestureActive by remember { mutableStateOf(false) }
+
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val tabAnim = remember { Animatable(selectedTab.toFloat()) }
+
+    LaunchedEffect(selectedTab) {
+        if (abs(tabAnim.targetValue - selectedTab.toFloat()) > 0.01f) {
+            tabAnim.animateTo(
+                selectedTab.toFloat(),
+                animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
+            )
+        }
+    }
+
+    fun Modifier.swipeableTabs(): Modifier = this.pointerInput(selectedTab) {
+        var totalDrag = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { totalDrag = 0f },
+            onDragEnd = {
+                val current = tabAnim.value
+                val target = when {
+                    totalDrag < -screenWidthPx * 0.2f && selectedTab < 2 -> selectedTab + 1
+                    totalDrag > screenWidthPx * 0.2f && selectedTab > 0 -> selectedTab - 1
+                    else -> kotlin.math.round(current).toInt().coerceIn(0, 2)
+                }
+                selectedTab = target
+                scope.launch {
+                    tabAnim.animateTo(
+                        target.toFloat(),
+                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
+                    )
+                }
+            },
+            onDragCancel = {
+                scope.launch {
+                    tabAnim.animateTo(
+                        selectedTab.toFloat(),
+                        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
+                    )
+                }
+            },
+            onHorizontalDrag = { _, dragAmount ->
+                totalDrag += dragAmount
+                scope.launch {
+                    val newVal = (tabAnim.value - dragAmount / screenWidthPx).coerceIn(0f, 2f)
+                    tabAnim.snapTo(newVal)
+                }
+            }
+        )
+    }
+
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            NavigationBar(modifier = Modifier.swipeableTabs()) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
@@ -177,22 +241,40 @@ fun MainScreen(
                         mapEpoch++
                     },
                     onStopTapped = { stopId -> viewModel.selectNearbyStopById(stopId) },
-                    onBusTapped = { plate -> viewModel.selectBusByPlate(plate) }
+                    onBusTapped = { plate -> viewModel.selectBusByPlate(plate) },
+                    onMapGestureChanged = { isMapGestureActive = it }
                 )
             }
 
-            when (selectedTab) {
-                0 -> TripTab(
-                    uiState = uiState,
-                    viewModel = viewModel,
-                    favoritesManager = favoritesManager,
-                    onStartJourney = onStartJourney,
-                    onOpenSettings = { showSettings = true }
-                )
-                1 -> Box(
+            // Sekme 0: Yol Tarifi (Harita arkada, kartlar önde)
+            val tab0Offset = (0 - tabAnim.value) * screenWidthPx
+            if (abs(tabAnim.value - 0f) < 1.05f) {
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .offset { IntOffset(tab0Offset.roundToInt(), 0) }
+                ) {
+                    TripTab(
+                        uiState = uiState,
+                        viewModel = viewModel,
+                        favoritesManager = favoritesManager,
+                        isMapGestureActive = isMapGestureActive,
+                        onStartJourney = onStartJourney,
+                        onOpenSettings = { showSettings = true },
+                        modifier = Modifier.swipeableTabs()
+                    )
+                }
+            }
+
+            // Sekme 1: Duraklar
+            val tab1Offset = (1 - tabAnim.value) * screenWidthPx
+            if (abs(tabAnim.value - 1f) < 1.05f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .offset { IntOffset(tab1Offset.roundToInt(), 0) }
                         .background(MaterialTheme.colorScheme.background)
+                        .swipeableTabs()
                 ) {
                     StopsTab(
                         uiState = uiState,
@@ -208,10 +290,17 @@ fun MainScreen(
                         }
                     )
                 }
-                else -> Box(
+            }
+
+            // Sekme 2: Hatlar
+            val tab2Offset = (2 - tabAnim.value) * screenWidthPx
+            if (abs(tabAnim.value - 2f) < 1.05f) {
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .offset { IntOffset(tab2Offset.roundToInt(), 0) }
                         .background(MaterialTheme.colorScheme.background)
+                        .swipeableTabs()
                 ) {
                     RoutesTab(
                         uiState = uiState,
@@ -229,14 +318,15 @@ fun MainScreen(
                 onStopJourney = {
                     JourneyService.stop(context)
                 },
-                modifier = Modifier.align(Alignment.BottomCenter)
+                isMapGestureActive = isMapGestureActive,
+                modifier = Modifier.align(Alignment.BottomCenter).swipeableTabs()
             )
         }
     }
 
     val layers = mapLayers
 
-    // Rota çizimi (plan seçili DEĞİLSE normal hat çizimi yapılır)
+    // Rota çizimi (plan seçili DEĞİLSE normal hat çizimi yapılır - Madde 7: dual-tone ve subtle stops)
     LaunchedEffect(
         uiState.selectedRouteCode, uiState.selectedDirection,
         uiState.selectedRouteStops, uiState.selectedRouteCoordinates,
@@ -248,15 +338,18 @@ fun MainScreen(
             // Plan seçiliyse normal hat çizimi temizlenir (çakışma önlenir)
             l.clearRouteOnly()
         } else if (uiState.selectedRouteCode != null) {
-            l.drawRoute(uiState.selectedRouteCoordinates, uiState.selectedDirection)
-            l.drawStops(uiState.selectedRouteStops, uiState.selectedDirection)
+            l.drawRouteDualTone(uiState.selectedRouteCoordinates, uiState.selectedDirection)
+            l.drawStops(uiState.selectedRouteStops, uiState.selectedDirection, subtle = true)
         } else {
             l.clearRouteOnly()
         }
     }
 
-    // v1.2.0: Seçili planın çok bacaklı çizimi (Moovit tarzı kesikli yürüme + mavi/turuncu otobüs)
-    LaunchedEffect(uiState.selectedPlan, uiState.tripOrigin, uiState.tripDestination, mapEpoch) {
+    // v1.2.0 + v1.6.0: Seçili planın çok bacaklı çizimi (Moovit tarzı kesikli yürüme + mavi/turuncu otobüs + OSRM/snap shapes)
+    LaunchedEffect(
+        uiState.selectedPlan, uiState.tripOrigin, uiState.tripDestination,
+        uiState.planBusLegShapes, uiState.planWalkLegShapes, mapEpoch
+    ) {
         val l = layers ?: return@LaunchedEffect
         if (mapEpoch == 0) return@LaunchedEffect
         val plan = uiState.selectedPlan
@@ -264,7 +357,9 @@ fun MainScreen(
             l.drawPlanLegs(
                 uiState.tripOrigin?.lat, uiState.tripOrigin?.lng,
                 uiState.tripDestination?.lat, uiState.tripDestination?.lng,
-                plan
+                plan,
+                uiState.planBusLegShapes,
+                uiState.planWalkLegShapes
             )
         } else {
             l.clearPlanLegs()
@@ -297,17 +392,28 @@ fun MainScreen(
         )
     }
 
-    // Seçili plan varsa: uç noktalara sığdır (Yol Tarifi sekmesine geç)
-    LaunchedEffect(uiState.selectedPlan, mapEpoch) {
+    // Seçili plan varsa: canlı otobüs + biniş durağı veya uç noktalara sığdır
+    LaunchedEffect(uiState.selectedPlan, uiState.selectedPlanLiveBus, mapEpoch) {
         val mv = mapView ?: return@LaunchedEffect
         val plan = uiState.selectedPlan ?: return@LaunchedEffect
         if (mapEpoch == 0) return@LaunchedEffect
         selectedTab = 0
         val pts = mutableListOf<LatLng>()
-        uiState.tripOrigin?.let { o -> pts.add(LatLng(o.lat, o.lng)) }
-        uiState.tripDestination?.let { d -> pts.add(LatLng(d.lat, d.lng)) }
-        plan.intermediateStops.forEach { s ->
-            MapUtils.latLng(s.latitude, s.longitude)?.let { pts.add(it) }
+        val liveBus = uiState.selectedPlanLiveBus
+        val firstBus = plan.legs.firstOrNull { it.kind == "bus" }
+        val bStop = firstBus?.boardStop ?: plan.originStop
+        val bLat = bStop.latitude?.toDoubleOrNull()
+        val bLng = bStop.longitude?.toDoubleOrNull()
+
+        if (liveBus?.enlem != null && liveBus.boylam != null && bLat != null && bLng != null) {
+            pts.add(LatLng(liveBus.enlem, liveBus.boylam))
+            pts.add(LatLng(bLat, bLng))
+        } else {
+            uiState.tripOrigin?.let { o -> pts.add(LatLng(o.lat, o.lng)) }
+            uiState.tripDestination?.let { d -> pts.add(LatLng(d.lat, d.lng)) }
+            plan.intermediateStops.forEach { s ->
+                MapUtils.latLng(s.latitude, s.longitude)?.let { pts.add(it) }
+            }
         }
         if (pts.isNotEmpty()) {
             mv.getMapAsync { map ->
@@ -368,21 +474,23 @@ private fun TripTab(
     uiState: MainUiState,
     viewModel: MainViewModel,
     favoritesManager: FavoritesManager,
+    isMapGestureActive: Boolean = false,
     onStartJourney: (Double, Double, String) -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     // Madde 3: Yolculuk başlamışken arama ve rota alternatifleri ekranları tamamen kapatılır
     val journeyActive by com.taha.goit.service.JourneyTracker.state.collectAsState()
     if (journeyActive != null) return
 
-    // Madde 1: Üst/alt sekme odaklanma ve daralma mantığı
+    // Madde 1 + Madde 5: Üst/alt sekme odaklanma ve harita jestinde daralma mantığı
     var activeFocus by rememberSaveable { mutableStateOf<String?>(null) } // "top" | "bottom" | null
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize()) {
         TripSearchCard(
             uiState = uiState,
             viewModel = viewModel,
-            isCollapsed = activeFocus == "bottom" && uiState.tripPlans.isNotEmpty(),
+            isCollapsed = (activeFocus == "bottom" && uiState.tripPlans.isNotEmpty()) || isMapGestureActive,
             onToggleCollapse = {
                 activeFocus = if (activeFocus == "top") null else "top"
             },
@@ -395,7 +503,7 @@ private fun TripTab(
             uiState = uiState,
             viewModel = viewModel,
             favoritesManager = favoritesManager,
-            isCollapsed = activeFocus == "top",
+            isCollapsed = (activeFocus == "top") || isMapGestureActive,
             onToggleCollapse = {
                 activeFocus = if (activeFocus == "bottom") null else "bottom"
             },
@@ -420,36 +528,40 @@ private fun TripSearchCard(
     var placeToManage by remember { mutableStateOf<SavedPlace?>(null) }
 
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) {
+                detectVerticalDragGestures { _, dragAmount ->
+                    if (dragAmount > 24) {
+                        if (!isCollapsed) onToggleCollapse()
+                    } else if (dragAmount < -24) {
+                        if (isCollapsed) onToggleCollapse()
+                    }
+                }
+            },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
     ) {
         if (isCollapsed && uiState.tripSearchField == null) {
-            // Daraltılmış Kompakt Görünüm (Madde 1)
+            // Daraltılmış Kompakt Görünüm
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = onToggleCollapse)
                     .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                Icon(Icons.Default.Directions, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "${uiState.tripOrigin?.name ?: "Kalkış"} → ${uiState.tripDestination?.name ?: "Varış"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Directions, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "${uiState.tripOrigin?.name ?: "Kalkış"} → ${uiState.tripDestination?.name ?: "Varış"}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Icon(Icons.Default.ExpandMore, "Genişlet", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                )
             }
         } else {
             Column(modifier = Modifier.padding(12.dp)) {
@@ -466,28 +578,81 @@ private fun TripSearchCard(
                     )
                 }
 
-                // Kalkış seçerken "Konumumu kullan" GPS kısayolu
-                if (uiState.tripSearchField == "origin" && uiState.userLat != null && uiState.userLng != null) {
-                    TextButton(
-                        onClick = { viewModel.setOriginToCurrentLocation() },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.MyLocation, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Mevcut Konumumu Kullan", fontWeight = FontWeight.SemiBold)
+                // Madde 8: Kompakt tek satır [MyLocation ikon butonu] + [arama alanı]
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (uiState.userLat != null && uiState.userLng != null) {
+                        IconButton(
+                            onClick = {
+                                if (uiState.tripSearchField == "origin") {
+                                    viewModel.setOriginToCurrentLocation()
+                                } else {
+                                    viewModel.selectTripPlace(PlaceResult("Konumum", "P", null, uiState.userLat, uiState.userLng))
+                                }
+                            },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(Icons.Default.MyLocation, "Konumum", tint = MaterialTheme.colorScheme.primary)
+                        }
+                        Spacer(Modifier.width(4.dp))
                     }
+                    OutlinedTextField(
+                        value = uiState.tripSearchQuery,
+                        onValueChange = { viewModel.onTripSearchQueryChange(it) },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Durak, mekan, link...") },
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
+                    )
                 }
 
-                OutlinedTextField(
-                    value = uiState.tripSearchQuery,
-                    onValueChange = { viewModel.onTripSearchQueryChange(it) },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Durak, mekan, Maps linki veya koordinat") },
-                    leadingIcon = { Icon(Icons.Default.Search, null) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
-                )
+                // Madde 8: Varış ekranında boş aramada Favori Konumlar + En Çok Gidilen
+                if (uiState.tripSearchField == "dest" && uiState.tripSearchQuery.isEmpty()) {
+                    if (uiState.savedPlaces.isNotEmpty()) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "Kayıtlı Yerler",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(uiState.savedPlaces) { place ->
+                                SavedPlaceChip(
+                                    place = place,
+                                    onClick = { viewModel.selectSavedPlaceAsDestination(place) },
+                                    onLongClick = { placeToManage = place }
+                                )
+                            }
+                        }
+                    }
+                    if (uiState.mostVisitedPlaces.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "En Çok Gidilen",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(uiState.mostVisitedPlaces) { vp ->
+                                SuggestionChip(
+                                    onClick = {
+                                        viewModel.selectTripPlace(PlaceResult(vp.name, "P", null, vp.lat, vp.lng))
+                                    },
+                                    label = { Text(vp.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    icon = { Icon(Icons.Default.TrendingUp, null, modifier = Modifier.size(16.dp)) }
+                                )
+                            }
+                        }
+                    }
+                }
                 if (uiState.isTripSearching) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -602,42 +767,6 @@ private fun TripSearchCard(
                                 onClick = { viewModel.selectSavedPlaceAsDestination(place) },
                                 onLongClick = { placeToManage = place }
                             )
-                        }
-                    }
-                }
-
-                // Son Yolculuklar (F3)
-                if (uiState.journeyHistory.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "Son Yolculuklar",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        uiState.journeyHistory.take(3).forEach { entry ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { viewModel.repeatJourney(entry) }
-                                    .padding(vertical = 4.dp, horizontal = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.History,
-                                    null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = "${entry.originName} → ${entry.destName}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
                         }
                     }
                 }
@@ -879,44 +1008,65 @@ private fun TripBottomPanel(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(10.dp),
+                    .padding(10.dp)
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures { _, dragAmount ->
+                            if (dragAmount > 24) {
+                                if (!isCollapsed) onToggleCollapse()
+                            } else if (dragAmount < -24) {
+                                if (isCollapsed) onToggleCollapse()
+                            }
+                        }
+                    },
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
                 if (isCollapsed && uiState.tripPlans.isNotEmpty()) {
-                    // Daraltılmış Kompakt Görünüm (Madde 1)
+                    // Daraltılmış Kompakt Görünüm
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable(onClick = onToggleCollapse)
                             .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.AltRoute, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.AltRoute, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Rota Alternatifleri (${uiState.tripPlans.size})",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (uiState.selectedPlan != null) {
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                text = "Rota Alternatifleri (${uiState.tripPlans.size})",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
+                                text = "• Seçili: ${uiState.selectedPlan!!.routeCode}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            if (uiState.selectedPlan != null) {
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = "• Seçili: ${uiState.selectedPlan!!.routeCode}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
                         }
-                        Icon(Icons.Default.ExpandLess, "Genişlet", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else if (uiState.selectedPlan != null) {
+                    // Madde 3: Rota Alternatifinde Genişleyen Otobüs Detayı
+                    Box(modifier = Modifier.padding(12.dp)) {
+                        ExpandedPlanDetailView(
+                            plan = uiState.selectedPlan!!,
+                            uiState = uiState,
+                            viewModel = viewModel,
+                            onStartJourney = {
+                                val json = viewModel.buildJourneyPayloadJson()
+                                if (json != null) {
+                                    if (LocationHelper.hasPermission(context)) {
+                                        JourneyService.startJourney(context, json)
+                                    } else {
+                                        Toast.makeText(context, "Canlı rehberlik için konum izni gerekli", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        )
                     }
                 } else {
                     Column(modifier = Modifier.padding(12.dp)) {
@@ -931,41 +1081,13 @@ private fun TripBottomPanel(
                             )
                             if (uiState.isTripPlanning) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            }
-                            IconButton(onClick = onToggleCollapse) {
-                                Icon(Icons.Default.ExpandMore, "Daralt")
+                                Spacer(Modifier.width(8.dp))
                             }
                             IconButton(onClick = { viewModel.clearTrip() }) {
                                 Icon(Icons.Default.Close, "Kapat")
                             }
                         }
 
-                        if (uiState.selectedPlan != null) {
-                            Button(
-                                onClick = {
-                                    val json = viewModel.buildJourneyPayloadJson()
-                                    if (json != null) {
-                                        if (LocationHelper.hasPermission(context)) {
-                                            JourneyService.startJourney(context, json)
-                                        } else {
-                                            Toast.makeText(context, "Canlı rehberlik için konum izni gerekli", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF16A34A),
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Yolculuğu Başlat", fontWeight = FontWeight.Bold)
-                            }
-                        }
                     val sortedPlans = remember(uiState.tripPlans, uiState.planSort) {
                         when (uiState.planSort) {
                             "hizli" -> {
@@ -1076,6 +1198,339 @@ private fun TripBottomPanel(
             uiState.tripPlans.isEmpty() && uiState.selectedBus == null
         ) {
             RouteDetailCard(uiState, viewModel)
+        }
+    }
+@Composable
+private fun ExpandedPlanDetailView(
+    plan: RoutePlan,
+    uiState: MainUiState,
+    viewModel: MainViewModel,
+    onStartJourney: () -> Unit
+) {
+    val context = LocalContext.current
+    val settingsManager = remember { (context.applicationContext as GoItApp).settingsManager }
+    val fareType = settingsManager.fareType // "TAM", "İNDİRİMLİ", "ÖĞRENCİ"
+
+    val firstBusLeg = plan.legs.firstOrNull { it.kind == "bus" }
+    val boardingStop = firstBusLeg?.boardStop ?: plan.originStop
+    val alightStop = firstBusLeg?.alightStop ?: plan.destinationStop
+
+    val farePriceText = remember(uiState.routePrice, fareType) {
+        if (uiState.routePrice.isEmpty()) null
+        else {
+            val target = fareType.uppercase(java.util.Locale.ROOT)
+            val match = uiState.routePrice.firstOrNull { cp ->
+                val ct = cp.cardType?.uppercase(java.util.Locale.ROOT) ?: ""
+                when (target) {
+                    "TAM" -> ct.contains("TAM")
+                    "İNDİRİMLİ" -> ct.contains("İNDİRİM") || ct.contains("INDIRIM")
+                    "ÖĞRENCİ" -> ct.contains("ÖĞRENC") || ct.contains("OGRENC")
+                    else -> false
+                }
+            } ?: uiState.routePrice.firstOrNull()
+            match?.let { formatPriceText(it.price) }
+        }
+    }
+
+    val busStops = remember(firstBusLeg, plan) {
+        if (firstBusLeg != null && firstBusLeg.stops.isNotEmpty()) {
+            firstBusLeg.stops
+        } else if (plan.intermediateStops.isNotEmpty()) {
+            val list = mutableListOf<RouteStop>()
+            list.add(plan.originStop)
+            list.addAll(plan.intermediateStops)
+            list.add(plan.destinationStop)
+            list
+        } else {
+            listOfNotNull(plan.originStop, plan.destinationStop)
+        }
+    }
+
+    val liveBus = uiState.selectedPlanLiveBus
+    val closestStopId = remember(liveBus, busStops) {
+        if (liveBus?.enlem != null && liveBus.boylam != null && busStops.isNotEmpty()) {
+            busStops.minByOrNull { s ->
+                val la = s.latitude?.toDoubleOrNull() ?: 0.0
+                val lo = s.longitude?.toDoubleOrNull() ?: 0.0
+                TransitRepository.calculateDistanceMeters(liveBus.enlem, liveBus.boylam, la, lo)
+            }?.stopId
+        } else null
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Üst Başlık & Kapatma
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { viewModel.deselectPlan() }) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Geri")
+            }
+            Spacer(Modifier.width(4.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (plan.isWalkOnly) "Yürüyüş Rotası" else plan.routeCode,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                if (!plan.isWalkOnly && plan.routeName.isNotBlank()) {
+                    Text(
+                        text = plan.routeName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            if (plan.isTransfer) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFFE37400).copy(alpha = 0.15f),
+                    modifier = Modifier.padding(end = 4.dp)
+                ) {
+                    Text(
+                        "1 Aktarma",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFE37400),
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            IconButton(onClick = { viewModel.clearTrip() }) {
+                Icon(Icons.Default.Close, contentDescription = "Kapat")
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        if (plan.isWalkOnly) {
+            // Yürüyüş Planı
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.DirectionsWalk,
+                    null,
+                    modifier = Modifier.size(32.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("Sadece yürüme ile ulaşım", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "${formatDistance(plan.walkOnlyMeters)} • ~${plan.estimatedDurationMinutes} dk",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (uiState.selectedPlanEstimatedArrival != null) {
+                        Text(
+                            uiState.selectedPlanEstimatedArrival!!,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+        } else {
+            // 2 Sütunlu Görünüm: Sol Dikey Durak Zaman Çizelgesi, Sağ Detaylar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+            ) {
+                // Sol Sütun: Dikey Duraklar
+                Column(
+                    modifier = Modifier
+                        .weight(1.1f)
+                        .fillMaxHeight()
+                ) {
+                    Text(
+                        "Duraklar (${busStops.size})",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) {
+                        itemsIndexed(busStops) { index, stop ->
+                            val isBoarding = stop.stopId == boardingStop.stopId
+                            val isAlight = stop.stopId == alightStop.stopId
+                            val isBusHere = stop.stopId == closestStopId
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Durak göstergesi
+                                when {
+                                    isBusHere -> {
+                                        Icon(
+                                            Icons.Default.DirectionsBus,
+                                            contentDescription = "Otobüs Konumu",
+                                            tint = Color(0xFF1A73E8),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    isBoarding -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(14.dp)
+                                                .background(Color(0xFF0F9D58), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Box(modifier = Modifier.size(6.dp).background(Color.White, CircleShape))
+                                        }
+                                    }
+                                    isAlight -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(14.dp)
+                                                .background(Color(0xFFD93025), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Box(modifier = Modifier.size(6.dp).background(Color.White, CircleShape))
+                                        }
+                                    }
+                                    else -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(horizontal = 4.dp)
+                                                .size(6.dp)
+                                                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), CircleShape)
+                                        )
+                                    }
+                                }
+
+                                Spacer(Modifier.width(8.dp))
+
+                                Text(
+                                    text = when {
+                                        isBoarding -> "Biniş: ${stop.stopName ?: ""}"
+                                        isAlight -> "İniş: ${stop.stopName ?: ""}"
+                                        else -> stop.stopName ?: ""
+                                    },
+                                    style = if (isBoarding || isAlight) MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                    else MaterialTheme.typography.bodySmall,
+                                    color = when {
+                                        isBoarding -> Color(0xFF0F9D58)
+                                        isAlight -> Color(0xFFD93025)
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.width(12.dp))
+
+                // Sağ Sütun: Fiyat, Durağa Varış, Sonraki Seferler, Hedefe Varış
+                Column(
+                    modifier = Modifier
+                        .weight(0.9f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        // Fiyat
+                        if (farePriceText != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Payments, null, tint = Color(0xFFF9AB00), modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    "$fareType: $farePriceText",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+
+                        // Otobüsün durağa ulaşma zamanı
+                        val stopKey = "${boardingStop.stopId}:${firstBusLeg?.routeCode ?: plan.routeCode}"
+                        val liveEta = uiState.planEtas[stopKey]
+                        val displayEta = if (!liveEta.isNullOrBlank() && liveEta != "–") liveEta else "Tarifeye göre"
+                        val isScheduled = liveEta?.contains("Planlı", true) == true || displayEta == "Tarifeye göre"
+                        val etaBadgeColor = if (isScheduled) Color(0xFF1976D2) else Color(0xFF0F9D58)
+
+                        Column {
+                            Text("Durağa Varış", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    if (isScheduled) Icons.Default.Schedule else Icons.Default.DirectionsBus,
+                                    null,
+                                    tint = etaBadgeColor,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    displayEta,
+                                    color = etaBadgeColor,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        // Sonraki seferler
+                        if (uiState.selectedPlanUpcomingRuns.isNotEmpty()) {
+                            Column {
+                                Text("Sonraki Seferler", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    uiState.selectedPlanUpcomingRuns.joinToString(" • "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+
+                    // En altta: Hedefe Tahmini Varış
+                    if (uiState.selectedPlanEstimatedArrival != null) {
+                        Text(
+                            uiState.selectedPlanEstimatedArrival!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+
+        // Yolculuğu Başlat Butonu
+        Button(
+            onClick = onStartJourney,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF16A34A),
+                contentColor = Color.White
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Yolculuğu Başlat", fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -2218,10 +2673,12 @@ private fun TripMap(
     onMapViewCreated: (MapView) -> Unit,
     onLayersReady: (MapLayers) -> Unit,
     onStopTapped: (Int) -> Unit,
-    onBusTapped: (String) -> Unit
+    onBusTapped: (String) -> Unit,
+    onMapGestureChanged: (Boolean) -> Unit = {}
 ) {
     val currentStopTapped by rememberUpdatedState(onStopTapped)
     val currentBusTapped by rememberUpdatedState(onBusTapped)
+    val currentGestureChanged by rememberUpdatedState(onMapGestureChanged)
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -2230,6 +2687,15 @@ private fun TripMap(
                 onMapViewCreated(mv)
                 mv.onCreate(null)
                 mv.getMapAsync { map ->
+                    map.addOnCameraMoveStartedListener { reason ->
+                        if (reason == org.maplibre.android.maps.MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                            currentGestureChanged(true)
+                        }
+                    }
+                    map.addOnCameraIdleListener {
+                        currentGestureChanged(false)
+                    }
+
                     map.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
                         map.cameraPosition = CameraPosition.Builder()
                             .target(LatLng(40.1832, 29.0647))
@@ -2242,7 +2708,8 @@ private fun TripMap(
                             stopIcon = MapUtils.createStopIcon(),
                             userIcon = MapUtils.createUserIcon(),
                             pinAIcon = MapUtils.createPinIcon("A", 0xFF0F9D58.toInt()),
-                            pinBIcon = MapUtils.createPinIcon("B", 0xFFD93025.toInt())
+                            pinBIcon = MapUtils.createPinIcon("B", 0xFFD93025.toInt()),
+                            subtleStopIcon = MapUtils.createSubtleStopIcon()
                         )
                         onLayersReady(layers)
                     }
