@@ -72,6 +72,45 @@ private const val STYLE_LIGHT = "https://basemaps.cartocdn.com/gl/positron-gl-st
 private const val STYLE_DARK = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
 private const val NEAR_STOP_METERS = 150.0
 
+private fun Modifier.panelDragGestures(
+    isCollapsed: Boolean,
+    dragDownToCollapse: Boolean,
+    onToggleCollapse: () -> Unit
+): Modifier = this.pointerInput(isCollapsed) {
+    var accumulatedDragY = 0f
+    detectVerticalDragGestures(
+        onDragStart = {
+            accumulatedDragY = 0f
+        },
+        onDragEnd = {
+            val threshold = 36.dp.toPx()
+            if (dragDownToCollapse) {
+                // Alt panel: aşağı sürüklenince kapanır, yukarı sürüklenince açılır
+                if (!isCollapsed && accumulatedDragY > threshold) {
+                    onToggleCollapse()
+                } else if (isCollapsed && accumulatedDragY < -threshold) {
+                    onToggleCollapse()
+                }
+            } else {
+                // Üst kart: yukarı sürüklenince kapanır, aşağı sürüklenince açılır
+                if (!isCollapsed && accumulatedDragY < -threshold) {
+                    onToggleCollapse()
+                } else if (isCollapsed && accumulatedDragY > threshold) {
+                    onToggleCollapse()
+                }
+            }
+            accumulatedDragY = 0f
+        },
+        onDragCancel = {
+            accumulatedDragY = 0f
+        },
+        onVerticalDrag = { change, dragAmount ->
+            change.consume()
+            accumulatedDragY += dragAmount
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -170,45 +209,6 @@ fun MainScreen(
                 animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1400f)
             )
         }
-    }
-
-    fun Modifier.panelDragGestures(
-        isCollapsed: Boolean,
-        dragDownToCollapse: Boolean,
-        onToggleCollapse: () -> Unit
-    ): Modifier = this.pointerInput(isCollapsed) {
-        var accumulatedDragY = 0f
-        detectVerticalDragGestures(
-            onDragStart = {
-                accumulatedDragY = 0f
-            },
-            onDragEnd = {
-                val threshold = 36.dp.toPx()
-                if (dragDownToCollapse) {
-                    // Alt panel: aşağı sürüklenince kapanır, yukarı sürüklenince açılır
-                    if (!isCollapsed && accumulatedDragY > threshold) {
-                        onToggleCollapse()
-                    } else if (isCollapsed && accumulatedDragY < -threshold) {
-                        onToggleCollapse()
-                    }
-                } else {
-                    // Üst kart: yukarı sürüklenince kapanır, aşağı sürüklenince açılır
-                    if (!isCollapsed && accumulatedDragY < -threshold) {
-                        onToggleCollapse()
-                    } else if (isCollapsed && accumulatedDragY > threshold) {
-                        onToggleCollapse()
-                    }
-                }
-                accumulatedDragY = 0f
-            },
-            onDragCancel = {
-                accumulatedDragY = 0f
-            },
-            onVerticalDrag = { change, dragAmount ->
-                change.consume()
-                accumulatedDragY += dragAmount
-            }
-        )
     }
 
     fun Modifier.swipeableTabs(): Modifier = this.pointerInput(selectedTab) {
