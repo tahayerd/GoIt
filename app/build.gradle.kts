@@ -22,6 +22,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            val ksPath = System.getenv("GOIT_KEYSTORE_PATH")
+            if (!ksPath.isNullOrBlank() && file(ksPath).exists()) {
+                signingConfig = signingConfigs.getByName("releaseSigning")
+            }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

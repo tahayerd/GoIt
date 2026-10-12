@@ -1,0 +1,39 @@
+name: Update Schedule Data
+
+on:
+  schedule:
+    - cron: '15 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Crawl bus schedules
+        run: |
+          python3 tools/crawl_schedule.py schedule-v1.json.gz
+
+      - name: Release schedule data bundle
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: schedule-data
+          name: "GoIt Schedule Data (Automated)"
+          prerelease: true
+          files: schedule-v1.json.gz
+          body: |
+            Automated Bursakart bus timetable bundle generated for GoIt offline cache.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
