@@ -841,23 +841,26 @@ private fun TripSearchCard(
                             )
                         }
                     }
-                // Alt Drag Handle (Açıkken yukarı itmek veya tıklayarak kapatmak için zarif tutamaç)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onToggleCollapse)
-                        .padding(top = 8.dp, bottom = 2.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                        modifier = Modifier.size(width = 36.dp, height = 4.dp)
-                    ) {}
                 }
+            }
+
+            // Alt Drag Handle (Açıkken yukarı itmek veya tıklayarak kapatmak için zarif tutamaç)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleCollapse)
+                    .padding(top = 8.dp, bottom = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                    modifier = Modifier.size(width = 36.dp, height = 4.dp)
+                ) {}
             }
         }
     }
+}
 
     // Dialog: Yer Kaydet (F2)
     if (placeToSave != null) {
