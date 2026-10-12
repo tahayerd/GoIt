@@ -12,7 +12,7 @@ android {
         applicationId = "com.taha.goit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
+        versionCode = 10
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

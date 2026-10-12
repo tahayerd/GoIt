@@ -15,6 +15,7 @@
         android:allowBackup="true"
         android:icon="@android:drawable/ic_dialog_map"
         android:label="GoIt Transit"
+        android:largeHeap="true"
         android:roundIcon="@android:drawable/ic_dialog_map"
         android:supportsRtl="true"
         android:theme="@style/Theme.GoIt">

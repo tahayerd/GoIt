@@ -146,8 +146,8 @@ class ScheduleCache(private val context: Context) {
                 }
             }
             return@withContext success
-        } catch (e: Exception) {
-            Log.e("ScheduleCache", "Error updating schedule data", e)
+        } catch (t: Throwable) {
+            Log.e("ScheduleCache", "Error updating schedule data", t)
             return@withContext false
         }
     }
@@ -156,70 +156,146 @@ class ScheduleCache(private val context: Context) {
         return (stopId.hashCode() and 0x7FFFFFFF) % numBuckets
     }
 
+    private fun escapeJson(s: String, sb: java.lang.StringBuilder) {
+        for (i in 0 until s.length) {
+            val c = s[i]
+            when (c) {
+                '\\' -> sb.append("\\\\")
+                '"' -> sb.append("\\\"")
+                '\b' -> sb.append("\\b")
+                '\u000c' -> sb.append("\\f")
+                '\n' -> sb.append("\\n")
+                '\r' -> sb.append("\\r")
+                '\t' -> sb.append("\\t")
+                else -> {
+                    if (c.code < 32) {
+                        sb.append(String.format(Locale.ROOT, "\\u%04x", c.code))
+                    } else {
+                        sb.append(c)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun readStopObjectToJson(reader: android.util.JsonReader, sb: java.lang.StringBuilder) {
+        sb.append("{")
+        reader.beginObject()
+        var firstDay = true
+        while (reader.hasNext()) {
+            val dayName = reader.nextName()
+            if (!firstDay) sb.append(",")
+            firstDay = false
+            sb.append("\"").append(dayName).append("\":[")
+            reader.beginArray()
+            var firstEntry = true
+            while (reader.hasNext()) {
+                reader.beginArray()
+                val rCode = if (reader.hasNext()) reader.nextString() else ""
+                val sTime = if (reader.hasNext()) reader.nextString() else ""
+                while (reader.hasNext()) {
+                    reader.skipValue()
+                }
+                reader.endArray()
+                if (!firstEntry) sb.append(",")
+                firstEntry = false
+                sb.append("[\"")
+                escapeJson(rCode, sb)
+                sb.append("\",\"")
+                escapeJson(sTime, sb)
+                sb.append("\"]")
+            }
+            reader.endArray()
+            sb.append("]")
+        }
+        reader.endObject()
+        sb.append("}")
+    }
+
     private fun processAndChunkGzip(gzFile: File): Boolean {
+        val tempChunksDir = File(scheduleDir, "chunks_temp")
+        if (tempChunksDir.exists()) tempChunksDir.deleteRecursively()
+        tempChunksDir.mkdirs()
+
+        val writers = arrayOfNulls<java.io.BufferedWriter>(numBuckets)
+        val isFirstEntry = BooleanArray(numBuckets) { true }
+        val stopSb = java.lang.StringBuilder(8192)
+
         try {
-            val bucketBuckets = Array(numBuckets) { mutableMapOf<String, MutableMap<String, MutableList<List<String>>>>() }
-
-            GZIPInputStream(FileInputStream(gzFile)).bufferedReader(Charsets.UTF_8).use { reader ->
-                val fullJsonStr = reader.readText()
-                val rootObj = json.parseToJsonElement(fullJsonStr).jsonObject
-                val stopsObj = rootObj["stops"]?.jsonObject ?: return false
-
-                for ((stopIdStr, daysElement) in stopsObj) {
-                    val stopId = stopIdStr.toIntOrNull() ?: continue
-                    val bIdx = getBucketIndex(stopId)
-                    val daysObj = daysElement.jsonObject
-                    val stopMap = bucketBuckets[bIdx].getOrPut(stopIdStr) { mutableMapOf() }
-
-                    for ((dayStr, entriesElement) in daysObj) {
-                        val entriesArray = entriesElement.jsonArray
-                        val dayList = stopMap.getOrPut(dayStr) { mutableListOf() }
-                        for (itemElement in entriesArray) {
-                            val arr = itemElement.jsonArray
-                            val rCode = arr.getOrNull(0)?.jsonPrimitive?.contentOrNull ?: continue
-                            val sTime = arr.getOrNull(1)?.jsonPrimitive?.contentOrNull ?: continue
-                            dayList.add(listOf(rCode, sTime))
-                        }
-                    }
-                }
-            }
-
-            // Write chunk files
-            val tempChunksDir = File(scheduleDir, "chunks_temp")
-            if (tempChunksDir.exists()) tempChunksDir.deleteRecursively()
-            tempChunksDir.mkdirs()
-
             for (i in 0 until numBuckets) {
-                val bucketData = bucketBuckets[i]
-                if (bucketData.isNotEmpty()) {
-                    val chunkFile = File(tempChunksDir, "chunk_$i.json")
-                    val chunkJson = buildJsonObject {
-                        for ((sId, days) in bucketData) {
-                            put(sId, buildJsonObject {
-                                for ((d, entries) in days) {
-                                    put(d, buildJsonArray {
-                                        for (entry in entries) {
-                                            add(buildJsonArray {
-                                                add(entry[0])
-                                                add(entry[1])
-                                            })
-                                        }
-                                    })
-                                }
-                            })
-                        }
-                    }
-                    chunkFile.writeText(chunkJson.toString())
-                }
+                val chunkFile = File(tempChunksDir, "chunk_$i.json")
+                val bw = java.io.BufferedWriter(
+                    java.io.OutputStreamWriter(java.io.FileOutputStream(chunkFile), Charsets.UTF_8),
+                    32768
+                )
+                bw.write("{")
+                writers[i] = bw
             }
 
-            // Atomic swap
+            GZIPInputStream(FileInputStream(gzFile)).bufferedReader(Charsets.UTF_8).use { br ->
+                val reader = android.util.JsonReader(br)
+                reader.beginObject()
+                while (reader.hasNext()) {
+                    val rootKey = reader.nextName()
+                    if (rootKey == "stops") {
+                        reader.beginObject()
+                        while (reader.hasNext()) {
+                            val stopIdStr = reader.nextName()
+                            val stopId = stopIdStr.toIntOrNull()
+                            stopSb.setLength(0)
+                            readStopObjectToJson(reader, stopSb)
+
+                            if (stopId != null) {
+                                val bIdx = getBucketIndex(stopId)
+                                val w = writers[bIdx]
+                                if (w != null) {
+                                    if (!isFirstEntry[bIdx]) {
+                                        w.write(",")
+                                    }
+                                    isFirstEntry[bIdx] = false
+                                    w.write("\"")
+                                    w.write(stopIdStr)
+                                    w.write("\":")
+                                    w.write(stopSb.toString())
+                                }
+                            }
+                        }
+                        reader.endObject()
+                    } else {
+                        reader.skipValue()
+                    }
+                }
+                reader.endObject()
+            }
+
+            // Close all bucket writers properly
+            for (i in 0 until numBuckets) {
+                writers[i]?.let { bw ->
+                    bw.write("}")
+                    bw.flush()
+                    bw.close()
+                }
+                writers[i] = null
+            }
+
+            // Atomic swap: replace chunksDir with tempChunksDir
             if (chunksDir.exists()) chunksDir.deleteRecursively()
-            tempChunksDir.renameTo(chunksDir)
+            val renamed = tempChunksDir.renameTo(chunksDir)
+            if (!renamed) {
+                tempChunksDir.copyRecursively(chunksDir, overwrite = true)
+                tempChunksDir.deleteRecursively()
+            }
             return true
-        } catch (e: Exception) {
-            Log.e("ScheduleCache", "Failed to chunk schedule data", e)
+        } catch (t: Throwable) {
+            Log.e("ScheduleCache", "Failed to stream and chunk schedule data", t)
+            tempChunksDir.deleteRecursively()
             return false
+        } finally {
+            for (w in writers) {
+                runCatching {
+                    w?.close()
+                }
+            }
         }
     }
 
