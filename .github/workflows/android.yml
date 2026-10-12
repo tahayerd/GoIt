@@ -54,7 +54,8 @@ jobs:
       - name: Verify keystore signature
         run: |
           BT=$(ls -d $ANDROID_HOME/build-tools/35.0.0 | head -1)
-          "$BT/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -i "DE:D8:68:61:54:FC:2C:C0:C1:70:B8:7B:B5:F3:D6:A0:C7:5A:B2:07"
+          "$BT/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
+          "$BT/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | tr -d ':' | grep -i "ded8686154fc2cc0c170b87bb5f3d6a0c75ab207"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
