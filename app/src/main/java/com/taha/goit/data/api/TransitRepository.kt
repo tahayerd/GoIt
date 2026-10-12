@@ -274,7 +274,7 @@ class TransitRepository {
         return fresh
     }
 
-    // 7. A'dan B'ye Rota Planlama Motoru (Multimodal Trip Planner, Moovit tarzı)
+    // 7. A'dan B'ye Rota Planlama Motoru (Multimodal Trip Planner)
     // Nokta tabanlı: kalkış/varış serbest koordinat; yürüme aday durakları çözülür.
     // Doğrudan hatlar HER ZAMAN aktarmalıların üstünde sıralanır (süreye göre).
     suspend fun planTrip(
@@ -775,7 +775,7 @@ class TransitRepository {
         return max(3, Math.round(drive + dwell).toInt())
     }
 
-    /** Yürüme süresi: 12 dk/km (Moovit benzeri). */
+    /** Yürüme süresi: 12 dk/km standart kentsel yürüme hızı. */
     private fun walkMinutes(meters: Double): Int {
         if (meters <= 0.0) return 0
         return max(1, Math.round(meters / 1000.0 * 12.0).toInt())
@@ -783,7 +783,7 @@ class TransitRepository {
 
     // Mesafe Hesaplama (Haversine - Metre Cinsinden)
     companion object {
-        // Planlama sabitleri (Moovit benzeri varsayılanlar)
+        // Planlama sabitleri
         private const val INITIAL_WAIT_MIN = 3
         private const val TRANSFER_WAIT_MIN = 5
         private const val MIN_WALK_LEG_M = 40.0

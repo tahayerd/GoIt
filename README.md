@@ -1,4 +1,4 @@
-# GoIt Transit — Bursa (FOSS Moovit Alternative)
+# GoIt Transit — Bursa (Modern FOSS Transit App)
 
 A lightweight, personal transit companion for Bursa. No ads, no telemetry, no trackers.
 
@@ -13,7 +13,7 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 
 ### Canlı Yolculuk Modu (Live Directions)
 - Tap **"Yolculuğu Başlat"** on any selected plan to launch full turn-by-turn transit guidance.
-- **In-App HUD Overlay & Foreground Service (fully automatic, Moovit-style):**
+- **In-App HUD Overlay & Foreground Service (fully automatic transit companion):**
   - **Yürüyüş (Walk):** Live walking distance and time countdown to board stop.
   - **Bekleme (Wait):** Live bus arrival ETA polling; boarding is **auto-detected** from GPS speed and distance from stop (no manual confirmation).
   - **Araçta (Ride):** One-way stop countdown ("N durak kaldı"), expandable stop list (passed, current, upcoming) with remaining duration estimation.

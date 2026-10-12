@@ -34,7 +34,7 @@ import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
 
 /**
- * Canlı yolculuk asistanı (V3 — tam otomatik, Moovit tarzı):
+ * Canlı yolculuk asistanı (V3 — tam otomatik kentsel transit rehberlik):
  * - Aşamalandırılmış yolculuk modu (Yürüme -> Bekleme/ETA -> Araç/Durak sayımı -> İniş/Varış alarmları)
  * - Kullanıcı onayı GEREKMEZ: biniş, hız + duraktan uzaklaşma ile otomatik algılanır
  * - Durak sayacı tek yönlüdür (GPS zıplamasında asla geri saymaz)
@@ -468,7 +468,7 @@ class JourneyService : Service(), LocationListener {
                 )
                 updateNotification("$etaPart • Durak: ${currentStage.targetName}", isAlert = false)
 
-                // Otomatik biniş algılama (Moovit tarzı, kullanıcı onayı yok):
+                // Otomatik biniş algılama (kullanıcı onayı gerektirmez):
                 // 1) Hızlı hareket: >12 km/h VE duraktan >150 m uzakta — ardışık 2 fix (~10 sn)
                 // 2) Yavaş trafik fallback: >6 km/h VE duraktan >400 m uzakta — ardışık 6 fix (~30 sn)
                 if (spd > 12f && distFromStop > 150f) consecutiveFastFar++ else consecutiveFastFar = 0
@@ -537,13 +537,13 @@ class JourneyService : Service(), LocationListener {
                 )
                 updateNotification("$route • $detail", isAlert = false)
 
-                // "Yaklaşıyorsun" erken uyarısı (Moovit: Arriving soon)
+                // "Yaklaşıyorsun" erken uyarısı
                 if (stopsRemaining == 2 && !hasWarnedApproaching) {
                     hasWarnedApproaching = true
                     updateNotification("Yaklaşıyorsun • 2 durak kaldı • ${currentStage.targetName}", isAlert = false)
                 }
 
-                // "Hazır ol!" iniş alarmı (Moovit: Get ready) — titreşimli
+                // "Hazır ol!" iniş alarmı — titreşimli
                 if ((stopsRemaining <= 1 || distToAlight <= 250.0) && !hasAlertedCurrentStage) {
                     hasAlertedCurrentStage = true
                     sendArrivalAlert("Hazır ol! Sıradaki durak iniş durağın • ${currentStage.targetName}")

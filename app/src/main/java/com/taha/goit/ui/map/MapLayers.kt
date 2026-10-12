@@ -40,7 +40,7 @@ class MapLayers(private val map: MapLibreMap) {
         const val SRC_PLAN = "goit-plan-src"
         const val LAYER_PLAN = "goit-plan-layer"
 
-        // v1.2.0: Moovit tarzı çok bacaklı plan katmanları
+        // v1.2.0: Çok bacaklı plan katmanları
         const val SRC_PLAN_LEGS = "goit-plan-legs-src"
         const val LAYER_PLAN_WALK = "goit-plan-walk-layer"
         const val LAYER_PLAN_BUS1 = "goit-plan-bus1-layer"
@@ -120,7 +120,7 @@ class MapLayers(private val map: MapLibreMap) {
                 )
             )
 
-            // v1.2.0: Çok bacaklı plan çizgileri (Moovit tarzı)
+            // Çok bacaklı plan çizgileri
             style.addSource(GeoJsonSource(SRC_PLAN_LEGS))
             // 1) Yürüme çizgisi (kesikli gri)
             style.addLayer(
@@ -234,14 +234,7 @@ class MapLayers(private val map: MapLibreMap) {
     }
 
     /**
-     * Seçilen tek bir planın bacaklarını çizer (Moovit tarzı):
-     *  - Yürüme bacakları: kesikli çizgi
-     *  - 1. otobüs bacağı: mavi çizgi
-     *  - 2. otobüs bacağı: turuncu çizgi
-     *  - Aktarma noktası: turuncu çember
-     */
-    /**
-     * Seçilen tek bir planın bacaklarını çizer (Moovit tarzı):
+     * Seçilen tek bir planın bacaklarını çizer:
      *  - Yürüme bacakları: FOSSGIS foot rotası ile yol üzerinden kesikli çizgi
      *  - 1. otobüs bacağı: kırpılmış gerçek hat şekli (routecoordinate) ile mavi çizgi
      *  - 2. otobüs bacağı: aktarma hattı gerçek şekli ile turuncu çizgi

@@ -110,7 +110,7 @@ data class RoutePlan(
     val firstRouteCode: String = "",
     val secondRouteCode: String = "",
     val transferStop: RouteStop? = null,
-    // Yürüme bacakları (Moovit tarzı)
+    // Yürüme bacakları
     val legs: List<PlanLeg> = emptyList(),
     val walkToMeters: Double = 0.0,
     val walkFromMeters: Double = 0.0,

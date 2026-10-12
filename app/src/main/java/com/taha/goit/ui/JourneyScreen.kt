@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.scale
 fun JourneyScreen(
     onStopJourney: () -> Unit,
     isMapGestureActive: Boolean = false,
+    mapInteractionProgress: Float = 0f,
     modifier: Modifier = Modifier
 ) {
     val state by JourneyTracker.state.collectAsState()
@@ -49,16 +50,20 @@ fun JourneyScreen(
     val isAlightImminent = runtime.stageType == "ride" &&
         (runtime.stopsRemaining ?: 99) <= 1
 
-    val animatedScale by animateFloatAsState(
-        targetValue = if (isMapGestureActive) 0.95f else 1f,
-        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f),
-        label = "hudScale"
-    )
-    val animatedAlpha by animateFloatAsState(
-        targetValue = if (isMapGestureActive) 0.88f else 1f,
-        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 400f),
-        label = "hudAlpha"
-    )
+    val hudScale = if (mapInteractionProgress > 0f) {
+        1f - (0.05f * mapInteractionProgress)
+    } else if (isMapGestureActive) {
+        0.95f
+    } else {
+        1f
+    }
+    val hudAlpha = if (mapInteractionProgress > 0f) {
+        1f - (0.12f * mapInteractionProgress)
+    } else if (isMapGestureActive) {
+        0.88f
+    } else {
+        1f
+    }
 
     Box(
         modifier = modifier
@@ -69,8 +74,8 @@ fun JourneyScreen(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .scale(animatedScale)
-                .alpha(animatedAlpha),
+                .scale(hudScale)
+                .alpha(hudAlpha),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(
                 containerColor = if (isAlightImminent) {

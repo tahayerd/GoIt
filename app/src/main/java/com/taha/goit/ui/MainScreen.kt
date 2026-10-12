@@ -17,15 +17,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -75,7 +81,8 @@ private const val NEAR_STOP_METERS = 150.0
 private fun Modifier.panelDragGestures(
     isCollapsed: Boolean,
     dragDownToCollapse: Boolean,
-    onToggleCollapse: () -> Unit
+    onToggleCollapse: () -> Unit,
+    onSetCollapse: ((Boolean) -> Unit)? = null
 ): Modifier = this.pointerInput(isCollapsed) {
     var accumulatedDragY = 0f
     detectVerticalDragGestures(
@@ -86,17 +93,17 @@ private fun Modifier.panelDragGestures(
             val threshold = 36.dp.toPx()
             if (dragDownToCollapse) {
                 // Alt panel: aşağı sürüklenince kapanır, yukarı sürüklenince açılır
-                if (!isCollapsed && accumulatedDragY > threshold) {
-                    onToggleCollapse()
-                } else if (isCollapsed && accumulatedDragY < -threshold) {
-                    onToggleCollapse()
+                if (accumulatedDragY > threshold) {
+                    if (onSetCollapse != null) onSetCollapse(true) else if (!isCollapsed) onToggleCollapse()
+                } else if (accumulatedDragY < -threshold) {
+                    if (onSetCollapse != null) onSetCollapse(false) else if (isCollapsed) onToggleCollapse()
                 }
             } else {
                 // Üst kart: yukarı sürüklenince kapanır, aşağı sürüklenince açılır
-                if (!isCollapsed && accumulatedDragY < -threshold) {
-                    onToggleCollapse()
-                } else if (isCollapsed && accumulatedDragY > threshold) {
-                    onToggleCollapse()
+                if (accumulatedDragY < -threshold) {
+                    if (onSetCollapse != null) onSetCollapse(true) else if (!isCollapsed) onToggleCollapse()
+                } else if (accumulatedDragY > threshold) {
+                    if (onSetCollapse != null) onSetCollapse(false) else if (isCollapsed) onToggleCollapse()
                 }
             }
             accumulatedDragY = 0f
@@ -195,57 +202,89 @@ fun MainScreen(
         }
     }
 
-    var isMapGestureActive by remember { mutableStateOf(false) }
-
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
     val tabAnim = remember { Animatable(selectedTab.toFloat()) }
 
+    // Harita etkileşim ilerlemesi: 0f = kartlar açık, 1f = harita odakta (kartlar küçültülmüş)
+    val mapInteractionProgress = remember { Animatable(0f) }
+    var restoreJob by remember { mutableStateOf<Job?>(null) }
+
+    val onMapGestureChanged: (Boolean) -> Unit = remember(scope) {
+        { isInteracting ->
+            if (isInteracting) {
+                // Dokunulduğu / sürüklendiği an: bekleyen geri dönüşü iptal et ve anında küçült
+                restoreJob?.cancel()
+                restoreJob = null
+                scope.launch {
+                    mapInteractionProgress.animateTo(
+                        1f,
+                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 800f)
+                    )
+                }
+            } else {
+                // Sürükleme bittiği an: 2 saniyelik zamanlayıcı başlar
+                // İlk 1 sn küçülmüş bekler, 1. sn'den itibaren 1 sn boyunca yavaşça tam açık konuma genişler
+                restoreJob?.cancel()
+                restoreJob = scope.launch {
+                    delay(1000L)
+                    mapInteractionProgress.animateTo(
+                        0f,
+                        animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing)
+                    )
+                }
+            }
+        }
+    }
+
     LaunchedEffect(selectedTab) {
         if (abs(tabAnim.targetValue - selectedTab.toFloat()) > 0.01f) {
             tabAnim.animateTo(
                 selectedTab.toFloat(),
-                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1400f)
+                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1600f)
             )
         }
     }
 
     fun Modifier.swipeableTabs(): Modifier = this.pointerInput(selectedTab) {
-        var totalDrag = 0f
-        detectHorizontalDragGestures(
-            onDragStart = { totalDrag = 0f },
-            onDragEnd = {
-                val current = tabAnim.value
-                val target = when {
-                    totalDrag < -screenWidthPx * 0.2f && selectedTab < 2 -> selectedTab + 1
-                    totalDrag > screenWidthPx * 0.2f && selectedTab > 0 -> selectedTab - 1
-                    else -> kotlin.math.round(current).toInt().coerceIn(0, 2)
-                }
-                selectedTab = target
-                scope.launch {
-                    tabAnim.animateTo(
-                        target.toFloat(),
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1400f)
-                    )
-                }
-            },
-            onDragCancel = {
-                scope.launch {
-                    tabAnim.animateTo(
-                        selectedTab.toFloat(),
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1400f)
-                    )
-                }
-            },
-            onHorizontalDrag = { _, dragAmount ->
-                totalDrag += dragAmount
-                scope.launch {
+        coroutineScope {
+            var totalDrag = 0f
+            detectHorizontalDragGestures(
+                onDragStart = { totalDrag = 0f },
+                onDragEnd = {
+                    val current = tabAnim.value
+                    val target = when {
+                        totalDrag < -screenWidthPx * 0.18f && selectedTab < 2 -> selectedTab + 1
+                        totalDrag > screenWidthPx * 0.18f && selectedTab > 0 -> selectedTab - 1
+                        else -> kotlin.math.round(current).toInt().coerceIn(0, 2)
+                    }
+                    selectedTab = target
+                    launch {
+                        tabAnim.animateTo(
+                            target.toFloat(),
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1600f)
+                        )
+                    }
+                },
+                onDragCancel = {
+                    launch {
+                        tabAnim.animateTo(
+                            selectedTab.toFloat(),
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1600f)
+                        )
+                    }
+                },
+                onHorizontalDrag = { change, dragAmount ->
+                    change.consume()
+                    totalDrag += dragAmount
                     val newVal = (tabAnim.value - dragAmount / screenWidthPx).coerceIn(0f, 2f)
-                    tabAnim.snapTo(newVal)
+                    launch {
+                        tabAnim.snapTo(newVal)
+                    }
                 }
-            }
-        )
+            )
+        }
     }
 
     Scaffold(
@@ -288,75 +327,75 @@ fun MainScreen(
                     },
                     onStopTapped = { stopId -> viewModel.selectNearbyStopById(stopId) },
                     onBusTapped = { plate -> viewModel.selectBusByPlate(plate) },
-                    onMapGestureChanged = { isMapGestureActive = it }
+                    onMapGestureChanged = onMapGestureChanged
                 )
             }
 
             // Sekme 0: Yol Tarifi (Harita arkada, kartlar önde)
-            val tab0Offset = (0 - tabAnim.value) * screenWidthPx
-            if (abs(tabAnim.value - 0f) < 1.05f) {
-                Box(
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = (0 - tabAnim.value) * screenWidthPx
+                        alpha = if (tabAnim.value > 1.05f) 0f else 1f
+                    }
+            ) {
+                TripTab(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    favoritesManager = favoritesManager,
+                    mapInteractionProgress = mapInteractionProgress.value,
+                    onStartJourney = onStartJourney,
+                    onOpenSettings = { showSettings = true },
                     modifier = Modifier
-                        .fillMaxSize()
-                        .offset { IntOffset(tab0Offset.roundToInt(), 0) }
-                ) {
-                    TripTab(
-                        uiState = uiState,
-                        viewModel = viewModel,
-                        favoritesManager = favoritesManager,
-                        isMapGestureActive = isMapGestureActive,
-                        onStartJourney = onStartJourney,
-                        onOpenSettings = { showSettings = true },
-                        modifier = Modifier
-                    )
-                }
+                )
             }
 
             // Sekme 1: Duraklar
-            val tab1Offset = (1 - tabAnim.value) * screenWidthPx
-            if (abs(tabAnim.value - 1f) < 1.05f) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .offset { IntOffset(tab1Offset.roundToInt(), 0) }
-                        .background(MaterialTheme.colorScheme.background)
-                        .swipeableTabs()
-                ) {
-                    StopsTab(
-                        uiState = uiState,
-                        viewModel = viewModel,
-                        favoritesManager = favoritesManager,
-                        onStartJourney = onStartJourney,
-                        onOpenSettings = { showSettings = true },
-                        onLocate = {
-                            scope.launch {
-                                val loc = LocationHelper.getFreshLocation(context)
-                                if (loc != null) viewModel.loadNearby(loc.latitude, loc.longitude)
-                            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = (1 - tabAnim.value) * screenWidthPx
+                        alpha = if (abs(tabAnim.value - 1f) > 1.05f) 0f else 1f
+                    }
+                    .background(MaterialTheme.colorScheme.background)
+                    .swipeableTabs()
+            ) {
+                StopsTab(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    favoritesManager = favoritesManager,
+                    onStartJourney = onStartJourney,
+                    onOpenSettings = { showSettings = true },
+                    onLocate = {
+                        scope.launch {
+                            val loc = LocationHelper.getFreshLocation(context)
+                            if (loc != null) viewModel.loadNearby(loc.latitude, loc.longitude)
                         }
-                    )
-                }
+                    }
+                )
             }
 
             // Sekme 2: Hatlar
-            val tab2Offset = (2 - tabAnim.value) * screenWidthPx
-            if (abs(tabAnim.value - 2f) < 1.05f) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .offset { IntOffset(tab2Offset.roundToInt(), 0) }
-                        .background(MaterialTheme.colorScheme.background)
-                        .swipeableTabs()
-                ) {
-                    RoutesTab(
-                        uiState = uiState,
-                        viewModel = viewModel,
-                        favoritesManager = favoritesManager,
-                        onStartJourney = onStartJourney,
-                        onOpenSettings = { showSettings = true },
-                        onStop = { viewModel.selectStop(it) }
-                    )
-                }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = (2 - tabAnim.value) * screenWidthPx
+                        alpha = if (tabAnim.value < 0.95f) 0f else 1f
+                    }
+                    .background(MaterialTheme.colorScheme.background)
+                    .swipeableTabs()
+            ) {
+                RoutesTab(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    favoritesManager = favoritesManager,
+                    onStartJourney = onStartJourney,
+                    onOpenSettings = { showSettings = true },
+                    onStop = { viewModel.selectStop(it) }
+                )
             }
 
             // Canlı Yolculuk HUD Kartı: Scaffold content sınırları içinde, alt sekmelerin üzerinde düzgünce yerleşir
@@ -364,7 +403,7 @@ fun MainScreen(
                 onStopJourney = {
                     JourneyService.stop(context)
                 },
-                isMapGestureActive = isMapGestureActive,
+                mapInteractionProgress = mapInteractionProgress.value,
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
@@ -391,7 +430,7 @@ fun MainScreen(
         }
     }
 
-    // v1.2.0 + v1.6.0: Seçili planın çok bacaklı çizimi (Moovit tarzı kesikli yürüme + mavi/turuncu otobüs + OSRM/snap shapes)
+    // Çok bacaklı plan çizimi (kesikli yürüme + mavi/turuncu otobüs + OSRM/snap shapes)
     LaunchedEffect(
         uiState.selectedPlan, uiState.tripOrigin, uiState.tripDestination,
         uiState.planBusLegShapes, uiState.planWalkLegShapes, mapEpoch
@@ -520,27 +559,25 @@ private fun TripTab(
     uiState: MainUiState,
     viewModel: MainViewModel,
     favoritesManager: FavoritesManager,
-    isMapGestureActive: Boolean = false,
+    mapInteractionProgress: Float = 0f,
     onStartJourney: (Double, Double, String) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Madde 3: Yolculuk başlamışken arama ve rota alternatifleri ekranları tamamen kapatılır
     val journeyActive by com.taha.goit.service.JourneyTracker.state.collectAsState()
     if (journeyActive != null) return
 
-    // Madde 1 + Madde 5: Üst/alt sekme odaklanma ve harita jestinde daralma mantığı
-    var activeFocus by rememberSaveable { mutableStateOf<String?>(null) } // "top" | "bottom" | null
+    var isTopCollapsed by rememberSaveable { mutableStateOf(false) }
+    var isBottomCollapsed by rememberSaveable { mutableStateOf(false) }
 
     Box(modifier = modifier.fillMaxSize()) {
         TripSearchCard(
             uiState = uiState,
             viewModel = viewModel,
-            isCollapsed = (activeFocus == "bottom" && uiState.tripPlans.isNotEmpty()) || isMapGestureActive,
-            isMapGestureActive = isMapGestureActive,
-            onToggleCollapse = {
-                activeFocus = if (activeFocus == "top") null else "top"
-            },
+            isCollapsed = isTopCollapsed,
+            mapInteractionProgress = mapInteractionProgress,
+            onToggleCollapse = { isTopCollapsed = !isTopCollapsed },
+            onSetCollapse = { isTopCollapsed = it },
             onOpenSettings = onOpenSettings,
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -550,11 +587,10 @@ private fun TripTab(
             uiState = uiState,
             viewModel = viewModel,
             favoritesManager = favoritesManager,
-            isCollapsed = (activeFocus == "top") || isMapGestureActive,
-            isMapGestureActive = isMapGestureActive,
-            onToggleCollapse = {
-                activeFocus = if (activeFocus == "bottom") null else "bottom"
-            },
+            isCollapsed = isBottomCollapsed,
+            mapInteractionProgress = mapInteractionProgress,
+            onToggleCollapse = { isBottomCollapsed = !isBottomCollapsed },
+            onSetCollapse = { isBottomCollapsed = it },
             onStartJourney = onStartJourney,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
@@ -566,8 +602,9 @@ private fun TripSearchCard(
     uiState: MainUiState,
     viewModel: MainViewModel,
     isCollapsed: Boolean = false,
-    isMapGestureActive: Boolean = false,
+    mapInteractionProgress: Float = 0f,
     onToggleCollapse: () -> Unit = {},
+    onSetCollapse: (Boolean) -> Unit = {},
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -576,22 +613,14 @@ private fun TripSearchCard(
     var customName by remember { mutableStateOf("") }
     var placeToManage by remember { mutableStateOf<SavedPlace?>(null) }
 
-    val animatedScale by animateFloatAsState(
-        targetValue = if (isMapGestureActive) 0.88f else 1f,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f),
-        label = "searchCardScale"
-    )
-    val animatedAlpha by animateFloatAsState(
-        targetValue = if (isMapGestureActive) 0.35f else 1f,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f),
-        label = "searchCardAlpha"
-    )
+    val targetScale = 1f - (0.12f * mapInteractionProgress)
+    val targetAlpha = 1f - (0.65f * mapInteractionProgress)
 
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .scale(animatedScale)
-            .alpha(animatedAlpha)
+            .scale(targetScale)
+            .alpha(targetAlpha)
             .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -605,7 +634,8 @@ private fun TripSearchCard(
                     .panelDragGestures(
                         isCollapsed = true,
                         dragDownToCollapse = false,
-                        onToggleCollapse = onToggleCollapse
+                        onToggleCollapse = onToggleCollapse,
+                        onSetCollapse = onSetCollapse
                     )
                     .clickable(onClick = onToggleCollapse)
                     .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -634,7 +664,8 @@ private fun TripSearchCard(
                     .panelDragGestures(
                         isCollapsed = false,
                         dragDownToCollapse = false,
-                        onToggleCollapse = onToggleCollapse
+                        onToggleCollapse = onToggleCollapse,
+                        onSetCollapse = onSetCollapse
                     )
             ) {
             if (uiState.tripSearchField != null) {
@@ -1085,22 +1116,15 @@ private fun TripBottomPanel(
     viewModel: MainViewModel,
     favoritesManager: FavoritesManager,
     isCollapsed: Boolean = false,
-    isMapGestureActive: Boolean = false,
+    mapInteractionProgress: Float = 0f,
     onToggleCollapse: () -> Unit = {},
+    onSetCollapse: (Boolean) -> Unit = {},
     onStartJourney: (Double, Double, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val animatedScale by animateFloatAsState(
-        targetValue = if (isMapGestureActive) 0.88f else 1f,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f),
-        label = "bottomPanelScale"
-    )
-    val animatedAlpha by animateFloatAsState(
-        targetValue = if (isMapGestureActive) 0.35f else 1f,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f),
-        label = "bottomPanelAlpha"
-    )
+    val targetScale = 1f - (0.12f * mapInteractionProgress)
+    val targetAlpha = 1f - (0.65f * mapInteractionProgress)
 
     Column(modifier = modifier.fillMaxWidth()) {
         if (uiState.tripPlans.isNotEmpty() || uiState.isTripPlanning || uiState.errorMessage != null) {
@@ -1108,8 +1132,8 @@ private fun TripBottomPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(10.dp)
-                    .scale(animatedScale)
-                    .alpha(animatedAlpha)
+                    .scale(targetScale)
+                    .alpha(targetAlpha)
                     .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))
                     .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * 0.55f),
                 shape = RoundedCornerShape(16.dp),
@@ -1123,7 +1147,8 @@ private fun TripBottomPanel(
                         .panelDragGestures(
                             isCollapsed = isCollapsed,
                             dragDownToCollapse = true,
-                            onToggleCollapse = onToggleCollapse
+                            onToggleCollapse = onToggleCollapse,
+                            onSetCollapse = onSetCollapse
                         )
                         .clickable(onClick = onToggleCollapse)
                         .padding(top = 6.dp, bottom = 4.dp),
@@ -1144,7 +1169,8 @@ private fun TripBottomPanel(
                             .panelDragGestures(
                                 isCollapsed = true,
                                 dragDownToCollapse = true,
-                                onToggleCollapse = onToggleCollapse
+                                onToggleCollapse = onToggleCollapse,
+                                onSetCollapse = onSetCollapse
                             )
                             .clickable(onClick = onToggleCollapse)
                             .padding(horizontal = 14.dp, vertical = 8.dp),
@@ -1195,7 +1221,8 @@ private fun TripBottomPanel(
                                 .panelDragGestures(
                                     isCollapsed = false,
                                     dragDownToCollapse = true,
-                                    onToggleCollapse = onToggleCollapse
+                                    onToggleCollapse = onToggleCollapse,
+                                    onSetCollapse = onSetCollapse
                                 ),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1768,7 +1795,7 @@ private fun PlanRow(
     }
 }
 
-/** Moovit tarzı adımlar: "6 dk yürü → 38 (12 durak) → 4 dk yürü" */
+/** Çok bacaklı rota adımları: "6 dk yürü → 38 (12 durak) → 4 dk yürü" */
 @Composable
 private fun PlanLegSummary(plan: RoutePlan) {
     val items = mutableListOf<String>()
