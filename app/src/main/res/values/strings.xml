@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">GoIt Transit</string>
+    <string name="directions_tab">Yol Tarifi</string>
+    <string name="stops_tab">Duraklar</string>
+    <string name="lines_tab">Hatlar</string>
+    <string name="settings_title">Ayarlar</string>
+    <string name="search_hint">Durak, hat veya yer ara…</string>
+    <string name="notification_channel_name">Canlı Yolculuk Takibi</string>
+    <string name="notification_channel_desc">Yolculuk boyunca durak ve varış bildirimleri</string>
+    <string name="alert_channel_name">İniş ve Varış Alarmları</string>
+    <string name="alert_channel_desc">Durağa yaklaşınca sesli ve titreşimli iniş uyarısı</string>
+</resources>

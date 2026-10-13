@@ -19,31 +19,49 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        buildConfigField("String", "BURULAS_API_BASE_URL", "\"https://bursakartapi.abys-web.com\"")
+        buildConfigField("String", "BURULAS_ORIGIN_HEADER", "\"https://www.bursakart.com.tr\"")
+        buildConfigField("String", "OSRM_API_BASE_URL", "\"https://routing.openstreetmap.de/routed-foot\"")
+        buildConfigField("String", "NOMINATIM_API_BASE_URL", "\"https://nominatim.openstreetmap.org\"")
     }
 
     signingConfigs {
         val ksPath = System.getenv("GOIT_KEYSTORE_PATH")
-        if (!ksPath.isNullOrEmpty() && file(ksPath).exists()) {
+        val ksFile = if (!ksPath.isNullOrEmpty()) file(ksPath) else null
+
+        if (ksFile != null && ksFile.exists()) {
+            create("release") {
+                storeFile = ksFile
+                storePassword = System.getenv("GOIT_KEYSTORE_PASSWORD") ?: "android"
+                keyAlias = System.getenv("GOIT_KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword = System.getenv("GOIT_KEY_PASSWORD") ?: "android"
+            }
             maybeCreate("debug").apply {
-                storeFile = file(ksPath)
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
+                storeFile = ksFile
+                storePassword = System.getenv("GOIT_KEYSTORE_PASSWORD") ?: "android"
+                keyAlias = System.getenv("GOIT_KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword = System.getenv("GOIT_KEY_PASSWORD") ?: "android"
             }
         }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
         debug {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            val debugSigning = signingConfigs.findByName("debug")
+            if (debugSigning != null) {
+                signingConfig = debugSigning
+            }
         }
     }
     compileOptions {
@@ -55,6 +73,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"
@@ -91,4 +110,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
+
+    // Unit Testing
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
+    testImplementation("io.mockk:mockk:1.13.10")
 }

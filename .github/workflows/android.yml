@@ -40,6 +40,9 @@ jobs:
           mkdir -p /tmp/ks
           echo "$KS_B64" | base64 -d > /tmp/ks/debug.keystore
 
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
       - name: Build debug APK
         env:
           GOIT_KEYSTORE_PATH: /tmp/ks/debug.keystore

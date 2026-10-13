@@ -57,6 +57,12 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 - Transit data comes directly from Burulaş/Bursakart public REST endpoints.
 - The only optional external lookups are Nominatim (OSM) for venues missing from the local database and FOSSGIS for foot routing.
 
+## Data & License Attribution
+- **Map Data:** © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL 1.0).
+- **Foot Routing:** FOSSGIS e.V. OpenStreetMap foot router.
+- **Geocoding:** OSM Nominatim (bounded to Bursa metropolitan area).
+- **Transit Timetable Data:** Burulaş / Bursakart public transit schedule data crawled and partitioned into 128 offline JSON buckets (`schedule-data` release, licensed under CC BY 4.0).
+
 ## Architecture
 - **Platform:** Android Native (Kotlin + Jetpack Compose)
 - **Maps:** MapLibre Native Android 11.13.5 + Carto Positron / Dark Matter (no Google Play Services)
