@@ -1,6 +1,9 @@
 package com.taha.goit.service
 
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 object JourneyTracker {
     data class RuntimeState(
@@ -19,5 +22,15 @@ object JourneyTracker {
         val upcomingStops: List<String> = emptyList(), // Kalan durakların listesi
         val estimatedMinutesRemaining: Int? = null     // Araçta inişe kalan tahmini dakika
     )
-    val state = MutableStateFlow<RuntimeState?>(null)
+
+    private val _state = MutableStateFlow<RuntimeState?>(null)
+    val state: StateFlow<RuntimeState?> = _state.asStateFlow()
+
+    fun updateState(newState: RuntimeState?) {
+        _state.value = newState
+    }
+
+    fun updateState(transform: (RuntimeState?) -> RuntimeState?) {
+        _state.update(transform)
+    }
 }

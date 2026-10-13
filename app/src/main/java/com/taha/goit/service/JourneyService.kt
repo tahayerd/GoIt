@@ -13,11 +13,11 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.taha.goit.GoItApp
 import com.taha.goit.MainActivity
+import com.taha.goit.R
 import com.taha.goit.data.api.TransitRepository
 import com.taha.goit.ui.formatDistance
 import com.taha.goit.ui.formatEtaTime
@@ -42,8 +42,10 @@ import kotlin.math.roundToInt
  */
 class JourneyService : Service(), LocationListener {
 
-    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val repository = TransitRepository()
+    // Y-15: Servis arka plan işleri için Dispatchers.Default
+    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    // Y-4: Singleton TransitRepository kullanımı
+    private val repository = TransitRepository.getInstance()
     private val json = Json { ignoreUnknownKeys = true }
     private var locationManager: LocationManager? = null
 
@@ -59,8 +61,12 @@ class JourneyService : Service(), LocationListener {
     private var currentWaitEta: String? = null
     private var lastKnownLocation: Location? = null
 
+    // O-4: Bildirim güncelleme throttling
+    private var lastNotificationText: String? = null
+    private var lastNotificationTime: Long = 0L
+
     // Otomatik biniş algılama (Bekle -> Araç geçişi)
-    private var consecutiveFastFar: Int = 0     // >12 km/h VE duraktan >150 m ( ardışık 2 fix = ~10 sn)
+    private var consecutiveFastFar: Int = 0     // >12 km/h VE duraktan >150 m (ardışık 2 fix = ~10 sn)
     private var consecutiveSlowFar: Int = 0     // >6 km/h VE duraktan >400 m (ardışık 6 fix = ~30 sn, yavaş trafik)
     private var lastFixForSpeed: Location? = null
 
@@ -130,7 +136,7 @@ class JourneyService : Service(), LocationListener {
         when (intent?.action) {
             ACTION_STOP -> {
                 stopTracking()
-                JourneyTracker.state.value = null
+                JourneyTracker.updateState(null)
                 serviceScope.cancel()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -145,7 +151,8 @@ class JourneyService : Service(), LocationListener {
                             enterStagedMode(parsed)
                             return START_STICKY
                         }
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        Log.w("JourneyService", "Failed to parse JourneyPayload", e)
                     }
                 }
             }
@@ -169,11 +176,18 @@ class JourneyService : Service(), LocationListener {
                     enterStagedMode(parsed)
                     return START_STICKY
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w("JourneyService", "Failed to parse fallback JourneyPayload", e)
             }
         }
 
-        return START_STICKY
+        // Y-14: Eşleşmeyen / boş intent durumunda sonsuz boş servis engeli
+        if (!isStagedMode && destinationName.isEmpty()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        return START_NOT_STICKY
     }
 
     private fun enterStagedMode(parsed: JourneyPayload) {
@@ -193,7 +207,7 @@ class JourneyService : Service(), LocationListener {
         consecutiveFastFar = 0
         consecutiveSlowFar = 0
         maxStopIdx = -1
-        currentWaitEta = null
+        lastFixForSpeed = null
     }
 
     private fun startForegroundCompat(notification: android.app.Notification) {
@@ -210,12 +224,14 @@ class JourneyService : Service(), LocationListener {
         startForegroundCompat(buildNotification(notifText, isAlert = false))
 
         if (initialStage != null) {
-            JourneyTracker.state.value = JourneyTracker.RuntimeState(
-                stageIndex = 0,
-                stageType = initialStage.type,
-                title = initialStage.title,
-                detail = initialStage.targetName,
-                progress = 0f
+            JourneyTracker.updateState(
+                JourneyTracker.RuntimeState(
+                    stageIndex = 0,
+                    stageType = initialStage.type,
+                    title = initialStage.title,
+                    detail = initialStage.targetName,
+                    progress = 0f
+                )
             )
             if (initialStage.type == "wait") {
                 startWaitEtaPolling(initialStage)
@@ -226,12 +242,14 @@ class JourneyService : Service(), LocationListener {
 
     private fun startLegacyTracking() {
         startForegroundCompat(buildNotification("Yolculuk başladı • Hedef: $destinationName", isAlert = false))
-        JourneyTracker.state.value = JourneyTracker.RuntimeState(
-            stageIndex = 0,
-            stageType = "ride",
-            title = "İniş Takibi",
-            detail = "Hedef: $destinationName",
-            progress = 0f
+        JourneyTracker.updateState(
+            JourneyTracker.RuntimeState(
+                stageIndex = 0,
+                stageType = "ride",
+                title = "İniş Takibi",
+                detail = "Hedef: $destinationName",
+                progress = 0f
+            )
         )
         requestLocationUpdates()
     }
@@ -259,16 +277,19 @@ class JourneyService : Service(), LocationListener {
                         "$route hattı bekleniyor"
                     }
                     val detail = "Durak: ${stage.targetName} • $etaPart"
-                    JourneyTracker.state.value = JourneyTracker.RuntimeState(
-                        stageIndex = stageIndex,
-                        stageType = "wait",
-                        title = stage.title.ifEmpty { "$route hattını bekle" },
-                        detail = detail,
-                        progress = 0f,
-                        waitEtaMinutes = currentWaitEta
+                    JourneyTracker.updateState(
+                        JourneyTracker.RuntimeState(
+                            stageIndex = stageIndex,
+                            stageType = "wait",
+                            title = stage.title.ifEmpty { "$route hattını bekle" },
+                            detail = detail,
+                            progress = 0f,
+                            waitEtaMinutes = currentWaitEta
+                        )
                     )
                     updateNotification("$etaPart • Durak: ${stage.targetName}", isAlert = false)
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    Log.w("JourneyService", "ETA polling error: ${e.message}")
                 }
                 delay(20_000L)
             }
@@ -276,6 +297,7 @@ class JourneyService : Service(), LocationListener {
     }
 
     private fun advanceStage(reason: String? = null) {
+        Log.d("JourneyService", "Advancing stage. Reason: $reason")
         stageIndex++
         resetStageCounters()
         waitEtaJob?.cancel()
@@ -283,19 +305,21 @@ class JourneyService : Service(), LocationListener {
 
         if (stageIndex >= stages.size) {
             val destName = payload?.destinationName ?: destinationName.ifEmpty { "Hedef" }
-            JourneyTracker.state.value = JourneyTracker.RuntimeState(
-                stageIndex = stageIndex,
-                stageType = "arrived",
-                title = "Hedefe ulaştın",
-                detail = destName,
-                progress = 1f
+            JourneyTracker.updateState(
+                JourneyTracker.RuntimeState(
+                    stageIndex = stageIndex,
+                    stageType = "arrived",
+                    title = "Hedefe ulaştın",
+                    detail = destName,
+                    progress = 1f
+                )
             )
             sendArrivalAlert("İndin. Hedefe ulaştın • $destName")
             updateNotification("İndin. Hedefe ulaştın • $destName", isAlert = true)
             serviceScope.launch {
                 delay(60_000L)
                 stopTracking()
-                JourneyTracker.state.value = null
+                JourneyTracker.updateState(null)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -308,12 +332,14 @@ class JourneyService : Service(), LocationListener {
         }
 
         lastKnownLocation?.let { onLocationChanged(it) } ?: run {
-            JourneyTracker.state.value = JourneyTracker.RuntimeState(
-                stageIndex = stageIndex,
-                stageType = nextStage.type,
-                title = nextStage.title,
-                detail = nextStage.targetName,
-                progress = 0f
+            JourneyTracker.updateState(
+                JourneyTracker.RuntimeState(
+                    stageIndex = stageIndex,
+                    stageType = nextStage.type,
+                    title = nextStage.title,
+                    detail = nextStage.targetName,
+                    progress = 0f
+                )
             )
             updateNotification(nextStage.title, isAlert = false)
         }
@@ -332,83 +358,77 @@ class JourneyService : Service(), LocationListener {
             if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5000L, 10f, this)
             }
-        } catch (_: SecurityException) {
-            updateNotification("Konum izni olmadan takip edilemiyor.", isAlert = false)
-        } catch (_: Exception) {
+        } catch (e: SecurityException) {
+            Log.e("JourneyService", "Konum izni eksik: ${e.message}")
         }
     }
 
     private fun stopTracking() {
         try {
             locationManager?.removeUpdates(this)
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
         waitEtaJob?.cancel()
         waitEtaJob = null
     }
 
-    /** GPS raporlu hız ile ardışık fix'lerden hesaplanan hızın büyüğü (km/h). */
+    /**
+     * İki fix arasındaki mesafeden veya cihazın raporladığı hızdan efektif km/h hesaplar.
+     */
     private fun speedKmh(location: Location): Float {
-        val reported = if (location.hasSpeed()) location.speed * 3.6f else 0f
-        var computed = 0f
-        val last = lastFixForSpeed
-        if (last != null) {
-            val dt = (location.time - last.time) / 1000f
-            if (dt in 1f..120f) {
-                val res = FloatArray(1)
-                Location.distanceBetween(
-                    last.latitude, last.longitude,
-                    location.latitude, location.longitude, res
-                )
-                computed = (res[0] / dt) * 3.6f
+        var spd = if (location.hasSpeed()) location.speed * 3.6f else 0f
+        val prev = lastFixForSpeed
+        if (prev != null && prev.time > 0 && location.time > prev.time) {
+            val dtSec = (location.time - prev.time) / 1000f
+            if (dtSec in 2f..30f) {
+                val d = prev.distanceTo(location)
+                val computedKmh = (d / dtSec) * 3.6f
+                spd = maxOf(spd, computedKmh)
             }
         }
         lastFixForSpeed = location
-        return maxOf(reported, computed)
+        return spd
     }
 
     override fun onLocationChanged(location: Location) {
         lastKnownLocation = location
 
         if (!isStagedMode) {
-            if (destinationLat == 0.0 && destinationLng == 0.0) return
+            // Legacy Tek Durak Modu
             val results = FloatArray(1)
             Location.distanceBetween(
                 location.latitude, location.longitude,
                 destinationLat, destinationLng, results
             )
-            val distanceMeters = results[0]
+            val distance = results[0].toDouble()
 
-            when {
-                distanceMeters < 250 && !hasAlerted -> {
-                    hasAlerted = true
-                    sendArrivalAlert("İniş zamanı! $destinationName durağındasınız.")
-                }
-                hasAlerted -> {
-                    updateNotification("İniş zamanı! $destinationName durağına hoş geldiniz.", true)
-                }
-                else -> {
-                    val etaMin = (distanceMeters / 1000.0 / 22.0 * 60.0).roundToInt()
-                    updateNotification(
-                        "Hedefe ${distanceMeters.roundToInt()} m kaldı (~$etaMin dk) • $destinationName",
-                        false
-                    )
-                }
-            }
-            JourneyTracker.state.value = JourneyTracker.RuntimeState(
-                stageIndex = 0,
-                stageType = "ride",
-                title = "İniş Takibi",
-                detail = "Hedef: $destinationName • ${distanceMeters.roundToInt()} m",
-                distanceToNextMeters = distanceMeters.toDouble(),
-                progress = 0f
+            val distText = formatDistance(distance)
+            val detail = "Kalan mesafe: $distText • $destinationName"
+            JourneyTracker.updateState(
+                JourneyTracker.RuntimeState(
+                    stageIndex = 0,
+                    stageType = "ride",
+                    title = "İniş Takibi",
+                    detail = detail,
+                    distanceToNextMeters = distance,
+                    progress = 0f
+                )
             )
+
+            // Y-17: SettingsManager ayarlarını kullan
+            val settings = (application as? GoItApp)?.settingsManager
+            val alertDist = (settings?.alightDistanceMeters ?: 250).toDouble()
+
+            if (distance <= alertDist && !hasAlerted) {
+                hasAlerted = true
+                sendArrivalAlert("İniş durağına yaklaştın! ($distText) • $destinationName")
+            } else {
+                updateNotification(detail, isAlert = false)
+            }
             return
         }
 
-        if (stageIndex >= stages.size) return
-        val currentStage = stages[stageIndex]
-
+        // V3 Staged Mod
+        val currentStage = stages.getOrNull(stageIndex) ?: return
         when (currentStage.type) {
             "walk" -> {
                 val results = FloatArray(1)
@@ -420,25 +440,28 @@ class JourneyService : Service(), LocationListener {
                 if (initialWalkDistance == null || dist > (initialWalkDistance ?: 0.0)) {
                     initialWalkDistance = dist
                 }
-                val etaMin = (dist / 80.0).roundToInt().coerceAtLeast(1)
-                val detail = "${formatDistance(dist)} (~$etaMin dk)"
-                val progress = if ((initialWalkDistance ?: 0.0) > 0.0) {
-                    ((1.0 - (dist / initialWalkDistance!!)).toFloat()).coerceIn(0f, 1f)
-                } else 0f
+                val initDist = initialWalkDistance ?: dist
+                val progress = if (initDist > 0) ((initDist - dist) / initDist).toFloat().coerceIn(0f, 1f) else 0f
+                val distText = formatDistance(dist)
+                val estWalkMin = TransitRepository.walkMinutes(dist, (application as? GoItApp)?.settingsManager?.walkingSpeedProfile ?: "normal")
+                val detail = "Kalan mesafe: $distText (~$estWalkMin dk) • ${currentStage.targetName}"
 
-                JourneyTracker.state.value = JourneyTracker.RuntimeState(
-                    stageIndex = stageIndex,
-                    stageType = "walk",
-                    title = currentStage.title.ifEmpty { "${currentStage.targetName} yürü" },
-                    detail = detail,
-                    distanceToNextMeters = dist,
-                    progress = progress,
-                    walkMinutes = etaMin
+                JourneyTracker.updateState(
+                    JourneyTracker.RuntimeState(
+                        stageIndex = stageIndex,
+                        stageType = "walk",
+                        title = currentStage.title,
+                        detail = detail,
+                        distanceToNextMeters = dist,
+                        progress = progress,
+                        walkMinutes = estWalkMin
+                    )
                 )
-                updateNotification("${currentStage.title} • $detail", isAlert = false)
+                updateNotification("${currentStage.title} • $distText", isAlert = false)
 
-                if (dist <= 60.0) {
-                    advanceStage("Durağa ulaştın")
+                // Durağa/hedefe varış: ≤40 m
+                if (dist <= 40.0) {
+                    advanceStage("Yürüyüş tamamlandı")
                 }
             }
 
@@ -458,13 +481,15 @@ class JourneyService : Service(), LocationListener {
                     "$route hattı bekleniyor"
                 }
                 val detail = "Durak: ${currentStage.targetName} • $etaPart"
-                JourneyTracker.state.value = JourneyTracker.RuntimeState(
-                    stageIndex = stageIndex,
-                    stageType = "wait",
-                    title = currentStage.title.ifEmpty { "$route hattını bekle" },
-                    detail = detail,
-                    progress = 0f,
-                    waitEtaMinutes = currentWaitEta
+                JourneyTracker.updateState(
+                    JourneyTracker.RuntimeState(
+                        stageIndex = stageIndex,
+                        stageType = "wait",
+                        title = currentStage.title.ifEmpty { "$route hattını bekle" },
+                        detail = detail,
+                        progress = 0f,
+                        waitEtaMinutes = currentWaitEta
+                    )
                 )
                 updateNotification("$etaPart • Durak: ${currentStage.targetName}", isAlert = false)
 
@@ -522,18 +547,20 @@ class JourneyService : Service(), LocationListener {
                     currentStage.stops.drop(effectiveIdx + 1).map { it.name }
                 } else emptyList()
 
-                JourneyTracker.state.value = JourneyTracker.RuntimeState(
-                    stageIndex = stageIndex,
-                    stageType = "ride",
-                    title = currentStage.title.ifEmpty { "$route ile git" },
-                    detail = detail,
-                    stopsRemaining = stopsRemaining,
-                    distanceToNextMeters = distToAlight,
-                    progress = progress,
-                    passedStops = passedList,
-                    currentStopName = nextStopName,
-                    upcomingStops = upcomingList,
-                    estimatedMinutesRemaining = estMinutes
+                JourneyTracker.updateState(
+                    JourneyTracker.RuntimeState(
+                        stageIndex = stageIndex,
+                        stageType = "ride",
+                        title = currentStage.title.ifEmpty { "$route ile git" },
+                        detail = detail,
+                        stopsRemaining = stopsRemaining,
+                        distanceToNextMeters = distToAlight,
+                        progress = progress,
+                        passedStops = passedList,
+                        currentStopName = nextStopName,
+                        upcomingStops = upcomingList,
+                        estimatedMinutesRemaining = estMinutes
+                    )
                 )
                 updateNotification("$route • $detail", isAlert = false)
 
@@ -543,8 +570,13 @@ class JourneyService : Service(), LocationListener {
                     updateNotification("Yaklaşıyorsun • 2 durak kaldı • ${currentStage.targetName}", isAlert = false)
                 }
 
+                // Y-17: SettingsManager iniş alarmı eşiği
+                val settings = (application as? GoItApp)?.settingsManager
+                val stopThreshold = settings?.alightStopsThreshold ?: 1
+                val distThreshold = (settings?.alightDistanceMeters ?: 250).toDouble()
+
                 // "Hazır ol!" iniş alarmı — titreşimli
-                if ((stopsRemaining <= 1 || distToAlight <= 250.0) && !hasAlertedCurrentStage) {
+                if ((stopsRemaining <= stopThreshold || distToAlight <= distThreshold) && !hasAlertedCurrentStage) {
                     hasAlertedCurrentStage = true
                     sendArrivalAlert("Hazır ol! Sıradaki durak iniş durağın • ${currentStage.targetName}")
                 }
@@ -564,22 +596,21 @@ class JourneyService : Service(), LocationListener {
 
     private fun sendArrivalAlert(alertText: String) {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-
-        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-            vm?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        }
-        vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 200, 500, 200, 500), -1))
+        VibrationHelper.vibrateAlert(this) // O-23
 
         val alert = buildAlert(alertText)
         nm.notify(ALERT_NOTIFICATION_ID, alert)
         updateNotification(alertText, isAlert = true)
     }
 
+    // O-4: Bildirim güncelleme throttling (en az 15 sn aralık veya metin değişimi)
     private fun updateNotification(text: String, isAlert: Boolean) {
+        val now = System.currentTimeMillis()
+        if (!isAlert && text == lastNotificationText && now - lastNotificationTime < 15_000L) {
+            return
+        }
+        lastNotificationText = text
+        lastNotificationTime = now
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIFICATION_ID, buildNotification(text, isAlert))
     }
@@ -597,7 +628,8 @@ class JourneyService : Service(), LocationListener {
         )
 
         val builder = NotificationCompat.Builder(this, if (isAlert) ALERT_CHANNEL_ID else CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_map)
+            .setSmallIcon(R.drawable.ic_notification) // Y-16 & D-1
+            .setColor(0xFF1976D2.toInt())
             .setContentTitle(if (isAlert) "GoIt İniş Uyarısı!" else "GoIt Canlı Yolculuk")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
@@ -615,7 +647,8 @@ class JourneyService : Service(), LocationListener {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_map)
+            .setSmallIcon(R.drawable.ic_notification) // Y-16 & D-1
+            .setColor(0xFFD32F2F.toInt())
             .setContentTitle("GoIt • İniş Zamanı!")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
@@ -630,17 +663,17 @@ class JourneyService : Service(), LocationListener {
             val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             val journey = NotificationChannel(
                 CHANNEL_ID,
-                "Yolculuk Asistanı",
+                getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "Canlı yolculuk takibi bildirimi" }
+            ).apply { description = getString(R.string.notification_channel_desc) }
             val alert = NotificationChannel(
                 ALERT_CHANNEL_ID,
-                "İniş Uyarısı",
+                getString(R.string.alert_channel_name),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "İniş zamanı uyarıları"
+                description = getString(R.string.alert_channel_desc)
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500)
+                vibrationPattern = VibrationHelper.ALERT_WAVEFORM
             }
             nm.createNotificationChannel(journey)
             nm.createNotificationChannel(alert)
@@ -650,7 +683,7 @@ class JourneyService : Service(), LocationListener {
     override fun onDestroy() {
         super.onDestroy()
         stopTracking()
-        JourneyTracker.state.value = null
+        JourneyTracker.updateState(null)
         serviceScope.cancel()
     }
 
