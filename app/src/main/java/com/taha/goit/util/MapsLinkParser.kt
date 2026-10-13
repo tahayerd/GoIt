@@ -51,7 +51,7 @@ object MapsLinkParser {
 
     // ?q=lat,lng veya ?query=lat,lng veya ll=lat,lng
     private val QUERY_COORD_PATTERN = Pattern.compile(
-        "(?:[?&](?:q|query|ll|center)=)([+-]?\\d{1,2}\\.\\d+)[,%20]+([+-]?\\d{1,3}\\.\\d+)"
+        "(?:[?&](?:q|query|ll|center)=)([+-]?\\d{1,2}\\.\\d+)(?:,|%20|\\s)+([+-]?\\d{1,3}\\.\\d+)"
     )
 
     // geo:lat,lng
