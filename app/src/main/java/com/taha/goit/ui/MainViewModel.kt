@@ -1,5 +1,7 @@
 package com.taha.goit.ui
 
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.taha.goit.data.api.NominatimGeocoder
@@ -35,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -146,19 +149,37 @@ data class MainUiState(
     val scheduleLastUpdateText: String = ""
 )
 
-class MainViewModel : ViewModel() {
-    private val repository = TransitRepository()
-    private val geocoder = NominatimGeocoder()
+class MainViewModel(application: Application) : AndroidViewModel(application) {
+    constructor() : this(com.taha.goit.GoItApp.instance)
 
-    private var favoritesManager: FavoritesManager? = null
-    private var historyManager: RouteHistoryManager? = null
-    private var savedPlacesManager: SavedPlacesManager? = null
-    private var journeyHistoryManager: JourneyHistoryManager? = null
-    private var settingsManager: SettingsManager? = null
-    private var scheduleCache: ScheduleCache? = null
-    private var osrmRouter: OsrmRouter? = null
+    private val app = application as com.taha.goit.GoItApp
+    private val repository = app.transitRepository
+    private val geocoder = app.nominatimGeocoder
+    private var osrmRouter: OsrmRouter? = app.osrmRouter
 
-    private val _uiState = MutableStateFlow(MainUiState())
+    private var favoritesManager: FavoritesManager? = app.favoritesManager
+    private var historyManager: RouteHistoryManager? = app.historyManager
+    private var savedPlacesManager: SavedPlacesManager? = app.savedPlacesManager
+    private var journeyHistoryManager: JourneyHistoryManager? = app.journeyHistoryManager
+    private var settingsManager: SettingsManager? = app.settingsManager
+    private var scheduleCache: ScheduleCache? = app.scheduleCache
+
+    private var currentNearestStopId: Int? = null
+
+    private val _uiState = MutableStateFlow(
+        MainUiState(
+            favorites = app.favoritesManager.getFavorites(),
+            recentRoutes = app.historyManager.getRecent(),
+            savedPlaces = app.savedPlacesManager.getAll(),
+            journeyHistory = app.journeyHistoryManager.getHistory(),
+            mostVisitedPlaces = app.journeyHistoryManager.getMostVisited(5),
+            walkAccessMeters = app.settingsManager.walkAccessMeters,
+            walkTransferMeters = app.settingsManager.walkTransferMeters,
+            favoriteAlertsEnabled = app.settingsManager.favoriteAlertsEnabled,
+            themeMode = app.settingsManager.themeMode,
+            fareType = app.settingsManager.fareType
+        )
+    )
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
     private var trackingJob: Job? = null
@@ -173,34 +194,34 @@ class MainViewModel : ViewModel() {
     fun setManagers(favorites: FavoritesManager, history: RouteHistoryManager) {
         favoritesManager = favorites
         historyManager = history
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             favorites = favorites.getFavorites(),
             recentRoutes = history.getRecent()
-        )
+        ) }
     }
 
     fun setPlacesManager(manager: SavedPlacesManager) {
         savedPlacesManager = manager
-        _uiState.value = _uiState.value.copy(savedPlaces = manager.getAll())
+        _uiState.update { it.copy(savedPlaces = manager.getAll()) }
     }
 
     fun setJourneyHistoryManager(manager: JourneyHistoryManager) {
         journeyHistoryManager = manager
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             journeyHistory = manager.getHistory(),
             mostVisitedPlaces = manager.getMostVisited(5)
-        )
+        ) }
     }
 
     fun setSettingsManager(manager: SettingsManager) {
         settingsManager = manager
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             walkAccessMeters = manager.walkAccessMeters,
             walkTransferMeters = manager.walkTransferMeters,
             favoriteAlertsEnabled = manager.favoriteAlertsEnabled,
             themeMode = manager.themeMode,
             fareType = manager.fareType
-        )
+        ) }
     }
 
     fun setScheduleCache(cache: ScheduleCache) {
@@ -218,7 +239,7 @@ class MainViewModel : ViewModel() {
 
     fun updateFareType(type: String) {
         settingsManager?.fareType = type
-        _uiState.value = _uiState.value.copy(fareType = type)
+        _uiState.update { it.copy(fareType = type) }
     }
 
     fun refreshScheduleStatus() {
@@ -231,37 +252,37 @@ class MainViewModel : ViewModel() {
         } else {
             "Henüz indirilmedi (çevrimiçi kullanılır)"
         }
-        _uiState.value = _uiState.value.copy(scheduleLastUpdateText = text)
+        _uiState.update { it.copy(scheduleLastUpdateText = text) }
     }
 
     fun updateScheduleData(force: Boolean = true) {
         val cache = scheduleCache ?: return
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isUpdatingSchedule = true)
-            val ok = cache.checkAndUpdateSchedule(force = force)
+            _uiState.update { it.copy(isUpdatingSchedule = true) }
+            cache.checkAndUpdateSchedule(force = force)
             refreshScheduleStatus()
-            _uiState.value = _uiState.value.copy(isUpdatingSchedule = false)
+            _uiState.update { it.copy(isUpdatingSchedule = false) }
         }
     }
 
     fun updateThemeMode(mode: String) {
         settingsManager?.themeMode = mode
-        _uiState.value = _uiState.value.copy(themeMode = mode)
+        _uiState.update { it.copy(themeMode = mode) }
     }
 
     fun updateWalkAccess(meters: Int) {
         settingsManager?.walkAccessMeters = meters
-        _uiState.value = _uiState.value.copy(walkAccessMeters = meters)
+        _uiState.update { it.copy(walkAccessMeters = meters) }
     }
 
     fun updateWalkTransfer(meters: Int) {
         settingsManager?.walkTransferMeters = meters
-        _uiState.value = _uiState.value.copy(walkTransferMeters = meters)
+        _uiState.update { it.copy(walkTransferMeters = meters) }
     }
 
     fun toggleFavoriteAlerts(enabled: Boolean) {
         settingsManager?.favoriteAlertsEnabled = enabled
-        _uiState.value = _uiState.value.copy(favoriteAlertsEnabled = enabled)
+        _uiState.update { it.copy(favoriteAlertsEnabled = enabled) }
     }
 
     fun resetOnboarding() {
@@ -270,7 +291,7 @@ class MainViewModel : ViewModel() {
 
     fun refreshSavedPlaces() {
         val manager = savedPlacesManager ?: return
-        _uiState.value = _uiState.value.copy(savedPlaces = manager.getAll())
+        _uiState.update { it.copy(savedPlaces = manager.getAll()) }
     }
 
     fun savePlace(place: SavedPlace) {
@@ -290,7 +311,7 @@ class MainViewModel : ViewModel() {
             TripPoint("Konumum", uLat, uLng, isUserLocation = true)
         } else null
 
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             tripOrigin = origin,
             tripDestination = TripPoint(place.name, place.lat, place.lng),
             tripSearchField = null,
@@ -299,14 +320,14 @@ class MainViewModel : ViewModel() {
             tripPlans = emptyList(),
             selectedPlan = null,
             errorMessage = null
-        )
+        ) }
         if (origin != null) {
             planTrip()
         }
     }
 
     fun selectSavedPlaceAsOrigin(place: SavedPlace) {
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             tripOrigin = TripPoint(place.name, place.lat, place.lng),
             tripSearchField = null,
             tripSearchQuery = "",
@@ -314,11 +335,11 @@ class MainViewModel : ViewModel() {
             tripPlans = emptyList(),
             selectedPlan = null,
             errorMessage = null
-        )
+        ) }
     }
 
     fun repeatJourney(entry: JourneyHistoryEntry) {
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             tripOrigin = TripPoint(entry.originName, entry.originLat, entry.originLng),
             tripDestination = TripPoint(entry.destName, entry.destLat, entry.destLng),
             tripSearchField = null,
@@ -327,26 +348,26 @@ class MainViewModel : ViewModel() {
             tripPlans = emptyList(),
             selectedPlan = null,
             errorMessage = null
-        )
+        ) }
         planTrip()
     }
 
     fun setPlanSort(sort: String) {
-        _uiState.value = _uiState.value.copy(planSort = sort)
+        _uiState.update { it.copy(planSort = sort) }
     }
 
     /** Gömülü veritabanları yüklendikten sonra çağrılır. */
     fun onLocalDataReady() {
-        _uiState.value = _uiState.value.copy(allRoutes = RouteCatalog.all())
+        _uiState.update { it.copy(allRoutes = RouteCatalog.all()) }
     }
 
     fun refreshFavorites() {
         val manager = favoritesManager ?: return
-        _uiState.value = _uiState.value.copy(favorites = manager.getFavorites())
+        _uiState.update { it.copy(favorites = manager.getFavorites()) }
     }
 
     private fun refreshRecent() {
-        _uiState.value = _uiState.value.copy(recentRoutes = historyManager?.getRecent() ?: emptyList())
+        _uiState.update { it.copy(recentRoutes = historyManager?.getRecent() ?: emptyList()) }
     }
 
     private var lastNearbyLat: Double? = null
@@ -358,11 +379,11 @@ class MainViewModel : ViewModel() {
      * yalnızca anlamlı hareket (>25 m) olduğunda tetiklenir.
      */
     fun updateUserLocation(lat: Double, lng: Double) {
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             userLat = lat,
             userLng = lng,
             locationAvailable = true
-        )
+        ) }
         val lLat = lastNearbyLat
         val lLng = lastNearbyLng
         if (lLat == null || lLng == null || TransitRepository.calculateDistanceMeters(lat, lng, lLat, lLng) > 25.0) {
@@ -381,7 +402,7 @@ class MainViewModel : ViewModel() {
             NearbyStopUi(s, d, prev[s.i]?.buses ?: emptyList())
         }
         val firstStation = nearest.firstOrNull()?.first
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             userLat = lat,
             userLng = lng,
             locationAvailable = true,
@@ -390,15 +411,19 @@ class MainViewModel : ViewModel() {
             nearestStopName = firstStation?.n,
             tripOrigin = _uiState.value.tripOrigin
                 ?: TripPoint("Konumum", lat, lng, isUserLocation = true)
-        )
+        ) }
         if (nearest.isNotEmpty()) {
+            val nearestStopId = nearest.first().first.i
             loadNearbyEtas(nearest)
-            startNearestStopEtaLoop(nearest.first().first.i, nearest.first().first.n)
+            if (currentNearestStopId != nearestStopId) {
+                currentNearestStopId = nearestStopId
+                startNearestStopEtaLoop(nearestStopId, nearest.first().first.n)
+            }
         }
     }
 
     fun markLocationMissing() {
-        _uiState.value = _uiState.value.copy(locationAvailable = false, isLoadingNearbyEtas = false)
+        _uiState.update { it.copy(locationAvailable = false, isLoadingNearbyEtas = false) }
     }
 
     /** Hatlar sekmesi: kullanıcının en yakın durağına yaklaşan hatların periyodik ETA'sı (~15 s). */
@@ -421,10 +446,10 @@ class MainViewModel : ViewModel() {
                     }
                         .sortedBy { it.timeSeconds }
                         .distinctBy { it.routeCode }
-                    _uiState.value = _uiState.value.copy(
+                    _uiState.update { it.copy(
                         nearestStopEtas = sorted,
                         nearestStopName = stopName
-                    )
+                    ) }
                 } catch (_: Exception) {
                 }
                 delay(15000)
@@ -432,8 +457,23 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    
+    fun stopBackgroundPolling() {
+        nearestEtaLoopJob?.cancel()
+        nearestEtaLoopJob = null
+        currentNearestStopId = null
+    }
+
+    fun resumeBackgroundPolling() {
+        val lat = _uiState.value.userLat
+        val lng = _uiState.value.userLng
+        if (lat != null && lng != null) {
+            loadNearby(lat, lng)
+        }
+    }
+
     fun toggleShowAllRoutes() {
-        _uiState.value = _uiState.value.copy(showAllRoutes = !_uiState.value.showAllRoutes)
+        _uiState.update { it.copy(showAllRoutes = !_uiState.value.showAllRoutes) }
     }
 
     private fun loadNearbyEtas(nearest: List<Pair<LocalStation, Double>>) {
@@ -477,13 +517,13 @@ class MainViewModel : ViewModel() {
                     .take(3)
                 rowsByStop[s.i] = rows
             }
-            _uiState.value = _uiState.value.copy(
+            _uiState.update { it.copy(
                 nearbyStops = _uiState.value.nearbyStops.map { ui ->
                     val rows = rowsByStop[ui.station.i]
                     if (rows != null) ui.copy(buses = rows) else ui
                 },
                 isLoadingNearbyEtas = false
-            )
+            ) }
         }
     }
 
@@ -530,83 +570,95 @@ class MainViewModel : ViewModel() {
     // ---------- Durak Seçimi ve Canlı ETA ----------
 
     fun selectStop(stop: RouteStop) {
-        _uiState.value = _uiState.value.copy(selectedStop = stop, stopLines = emptyList(), stopSchedule = emptyList(), showSchedule = false)
+        _uiState.update { it.copy(selectedStop = stop, stopLines = emptyList(), stopSchedule = emptyList(), showSchedule = false) }
         val stopId = stop.stopId ?: return
         etaJob?.cancel()
         etaJob = viewModelScope.launch {
             while (true) {
                 val eta = repository.getStationRemainingTime(stopId)
-                _uiState.value = _uiState.value.copy(stopEtaList = eta)
+                _uiState.update { it.copy(stopEtaList = eta) }
                 delay(10000)
             }
         }
         viewModelScope.launch {
             val lines = repository.getRoutesByStop(stopId)
-            _uiState.value = _uiState.value.copy(stopLines = lines)
+            _uiState.update { it.copy(stopLines = lines) }
         }
     }
 
     fun clearStop() {
         etaJob?.cancel()
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             selectedStop = null,
             stopEtaList = emptyList(),
             stopSchedule = emptyList(),
             showSchedule = false,
             stopLines = emptyList()
-        )
+        ) }
     }
 
     /** Durak tarifesini aç/kapat. */
     fun toggleSchedule() {
         val state = _uiState.value
         if (state.showSchedule) {
-            _uiState.value = state.copy(showSchedule = false)
+            _uiState.update { it.copy(showSchedule = false) }
             return
         }
         val stopId = state.selectedStop?.stopId ?: return
         val weekDay = getBurulasWeekDay()
-        _uiState.value = state.copy(showSchedule = true, stopSchedule = emptyList())
+        _uiState.update { it.copy(showSchedule = true, stopSchedule = emptyList()) }
         viewModelScope.launch {
             val cached = scheduleCache?.getSchedule(stopId, weekDay)
             val schedule = if (!cached.isNullOrEmpty()) cached else repository.getStopSchedule(stopId, weekDay)
-            _uiState.value = _uiState.value.copy(stopSchedule = schedule)
+            _uiState.update { it.copy(stopSchedule = schedule) }
         }
     }
 
     // ---------- Yol Tarifi (A'dan B'ye) ----------
 
     fun openTripSearch(field: String) {
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             tripSearchField = field,
             tripSearchQuery = "",
             tripSearchResults = emptyList()
-        )
+        ) }
     }
 
     fun cancelTripSearch() {
         searchJob?.cancel()
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             tripSearchField = null,
             tripSearchQuery = "",
             tripSearchResults = emptyList(),
             isTripSearching = false
-        )
+        ) }
     }
 
     fun onTripSearchQueryChange(query: String) {
-        _uiState.value = _uiState.value.copy(tripSearchQuery = query)
+        _uiState.update { it.copy(tripSearchQuery = query) }
         searchJob?.cancel()
-        if (query.trim().length < 2) {
-            _uiState.value = _uiState.value.copy(tripSearchResults = emptyList(), isTripSearching = false)
+        val trimmed = query.trim()
+        if (trimmed.length < 2) {
+            _uiState.update { it.copy(tripSearchResults = emptyList(), isTripSearching = false) }
             return
         }
-        searchJob = viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isTripSearching = true)
-            val q = query.trim()
 
-            // 1. Google Maps linki veya koordinat (40.1832, 29.0647) kontrolü
-            val parsedLocation = MapsLinkParser.parse(q)
+        // O-3: Yerel aramayı ANINDA çalıştır (yapay gecikme yok!)
+        val local = StationDatabase.search(trimmed, 30).map {
+            PlaceResult(
+                name = it.n,
+                kind = if (it.t == 1) "S" else "P",
+                stopId = if (it.t == 1) it.i else null,
+                lat = it.la,
+                lng = it.lo,
+                subtitle = if (it.t == 1) "Durak" else "Mekan"
+            )
+        }
+        _uiState.update { it.copy(tripSearchResults = local, isTripSearching = true) }
+
+        searchJob = viewModelScope.launch {
+            // 1. Google Maps linki veya koordinat kontrolü
+            val parsedLocation = MapsLinkParser.parse(trimmed)
             if (parsedLocation != null) {
                 val direct = PlaceResult(
                     name = parsedLocation.label ?: "Harita Konumu",
@@ -616,29 +668,21 @@ class MainViewModel : ViewModel() {
                     lng = parsedLocation.lng,
                     subtitle = String.format(java.util.Locale.US, "%.5f, %.5f", parsedLocation.lat, parsedLocation.lng)
                 )
-                _uiState.value = _uiState.value.copy(
-                    tripSearchResults = listOf(direct),
-                    isTripSearching = false
-                )
+                _uiState.update {
+                    it.copy(
+                        tripSearchResults = listOf(direct),
+                        isTripSearching = false
+                    )
+                }
                 return@launch
             }
 
-            delay(250)
-            val local = StationDatabase.search(q, 30).map {
-                PlaceResult(
-                    name = it.n,
-                    kind = if (it.t == 1) "S" else "P",
-                    stopId = if (it.t == 1) it.i else null,
-                    lat = it.la,
-                    lng = it.lo,
-                    subtitle = if (it.t == 1) "Durak" else "Mekan"
-                )
-            }
-            var merged: List<PlaceResult> = local
+            // Yalnızca yerel yetersizse Nominatim çağrısını debounce et
             if (local.size < 8) {
-                val osm = geocoder.searchPlaces(q, 6).map { o ->
+                delay(300)
+                val osm = geocoder.searchPlaces(trimmed, 6).map { o ->
                     PlaceResult(
-                        name = o.name ?: o.displayName?.substringBefore(", ") ?: q,
+                        name = o.name ?: o.displayName?.substringBefore(", ") ?: trimmed,
                         kind = "O",
                         stopId = null,
                         lat = o.lat?.toDoubleOrNull(),
@@ -646,9 +690,11 @@ class MainViewModel : ViewModel() {
                         subtitle = "OpenStreetMap"
                     )
                 }
-                merged = local + osm
+                val merged = local + osm
+                _uiState.update { it.copy(tripSearchResults = merged, isTripSearching = false) }
+            } else {
+                _uiState.update { it.copy(isTripSearching = false) }
             }
-            _uiState.value = _uiState.value.copy(tripSearchResults = merged, isTripSearching = false)
         }
     }
 
@@ -662,7 +708,7 @@ class MainViewModel : ViewModel() {
 
         when (field) {
             "origin" -> {
-                _uiState.value = state.copy(
+                _uiState.update { it.copy(
                     tripOrigin = point,
                     tripSearchField = null,
                     tripSearchQuery = "",
@@ -670,10 +716,10 @@ class MainViewModel : ViewModel() {
                     tripPlans = emptyList(),
                     selectedPlan = null,
                     errorMessage = null
-                )
+                ) }
             }
             "dest" -> {
-                _uiState.value = state.copy(
+                _uiState.update { it.copy(
                     tripDestination = point,
                     tripSearchField = null,
                     tripSearchQuery = "",
@@ -681,7 +727,7 @@ class MainViewModel : ViewModel() {
                     tripPlans = emptyList(),
                     selectedPlan = null,
                     errorMessage = null
-                )
+                ) }
                 // v1.2.0: Varış seçildiğinde otomatik planlama YAPILMAZ; "Rota Bul" butonuna basılması beklenir.
             }
         }
@@ -692,7 +738,7 @@ class MainViewModel : ViewModel() {
         val lat = _uiState.value.userLat
         val lng = _uiState.value.userLng
         if (lat != null && lng != null) {
-            _uiState.value = _uiState.value.copy(
+            _uiState.update { it.copy(
                 tripOrigin = TripPoint("Konumum", lat, lng, isUserLocation = true),
                 tripSearchField = null,
                 tripSearchQuery = "",
@@ -700,13 +746,13 @@ class MainViewModel : ViewModel() {
                 tripPlans = emptyList(),
                 selectedPlan = null,
                 errorMessage = null
-            )
+            ) }
         }
     }
 
     /** Dışarıdan (Intent / Google Maps linki) gelen hedef konumu doğrudan varış noktası yapar. */
     fun setDestinationFromExternal(lat: Double, lng: Double, label: String?) {
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             tripDestination = TripPoint(label ?: "Google Haritalar", lat, lng),
             tripSearchField = null,
             tripSearchQuery = "",
@@ -715,7 +761,7 @@ class MainViewModel : ViewModel() {
             selectedPlan = null,
             errorMessage = null,
             navigateToTab = 0
-        )
+        ) }
     }
 
     fun planTrip() {
@@ -724,15 +770,15 @@ class MainViewModel : ViewModel() {
 
         val distance = TransitRepository.calculateDistanceMeters(o.lat, o.lng, d.lat, d.lng)
         if (distance < 30.0) {
-            _uiState.value = _uiState.value.copy(
+            _uiState.update { it.copy(
                 tripPlans = emptyList(),
                 errorMessage = "Kalkış ve varış aynı nokta. Farklı bir varış seçin."
-            )
+            ) }
             return
         }
 
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isTripPlanning = true, selectedPlan = null, errorMessage = null)
+            _uiState.update { it.copy(isTripPlanning = true, selectedPlan = null, errorMessage = null) }
             val access = _uiState.value.walkAccessMeters.toDouble()
             val transfer = _uiState.value.walkTransferMeters.toDouble()
             val transitPlans = repository.planTrip(o.lat, o.lng, d.lat, d.lng, maxAccess = access, maxTransferWalk = transfer)
@@ -745,11 +791,20 @@ class MainViewModel : ViewModel() {
                 transitPlans
             }
 
-            _uiState.value = _uiState.value.copy(
-                tripPlans = finalPlans,
-                isTripPlanning = false,
-                errorMessage = if (finalPlans.isEmpty()) "Bu iki nokta arasında uygun rota bulunamadı." else null
-            )
+            val errorMsg = when (repository.getLastPlanError()) {
+                "TIMEOUT" -> "Sunucu yanıt vermedi (zaman aşımı). Lütfen tekrar deneyin."
+                "NETWORK" -> "İnternet bağlantısı kurulamadı. Ağınızı kontrol edin."
+                "NO_ROUTE" -> if (finalPlans.isEmpty()) "Bu iki nokta arasında uygun rota bulunamadı." else null
+                else -> if (finalPlans.isEmpty()) "Bu iki nokta arasında uygun rota bulunamadı." else null
+            }
+
+            _uiState.update {
+                it.copy(
+                    tripPlans = finalPlans,
+                    isTripPlanning = false,
+                    errorMessage = errorMsg
+                )
+            }
             if (finalPlans.isNotEmpty()) {
                 journeyHistoryManager?.let { mgr ->
                     mgr.add(
@@ -764,10 +819,10 @@ class MainViewModel : ViewModel() {
                         )
                     )
                     mgr.recordDestinationVisit(d.name, d.lat, d.lng)
-                    _uiState.value = _uiState.value.copy(
+                    _uiState.update { it.copy(
                         journeyHistory = mgr.getHistory(),
                         mostVisitedPlaces = mgr.getMostVisited(5)
-                    )
+                    ) }
                 }
                 startPlanEtaLoop()
             } else {
@@ -784,20 +839,20 @@ class MainViewModel : ViewModel() {
      * - Hedefe tahmini varış saati (HH:mm) hesaplanır
      */
     fun selectRouteFromPlan(plan: RoutePlan) {
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             selectedPlan = plan,
             selectedRouteCode = null,
             selectedStop = null,
             selectedPlanLiveBus = null,
             selectedPlanUpcomingRuns = emptyList(),
             selectedPlanEstimatedArrival = null
-        )
+        ) }
         loadPlanLegShapes(plan)
         loadPlanDetailData(plan)
     }
 
     fun deselectPlan() {
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             selectedPlan = null,
             selectedPlanLiveBus = null,
             selectedPlanUpcomingRuns = emptyList(),
@@ -805,7 +860,7 @@ class MainViewModel : ViewModel() {
             routePrice = emptyList(),
             planBusLegShapes = emptyMap(),
             planWalkLegShapes = emptyMap()
-        )
+        ) }
     }
 
     private fun loadPlanLegShapes(plan: RoutePlan) {
@@ -837,10 +892,10 @@ class MainViewModel : ViewModel() {
                 }
             }
 
-            _uiState.value = _uiState.value.copy(
+            _uiState.update { it.copy(
                 planBusLegShapes = busShapes,
                 planWalkLegShapes = walkShapes
-            )
+            ) }
         }
     }
 
@@ -959,7 +1014,7 @@ class MainViewModel : ViewModel() {
             if (!code.isNullOrBlank()) {
                 try {
                     val price = repository.getRoutePriceCached(code)
-                    _uiState.value = _uiState.value.copy(routePrice = price)
+                    _uiState.update { it.copy(routePrice = price) }
                 } catch (_: Exception) {}
             }
 
@@ -1010,11 +1065,11 @@ class MainViewModel : ViewModel() {
             val arrivalM = String.format(java.util.Locale.ROOT, "%02d", arrivalCal.get(java.util.Calendar.MINUTE))
             val arrivalText = "Hedefe Tahmini Varış: $arrivalH:$arrivalM"
 
-            _uiState.value = _uiState.value.copy(
+            _uiState.update { it.copy(
                 selectedPlanLiveBus = liveBus,
                 selectedPlanUpcomingRuns = upcomingRuns,
                 selectedPlanEstimatedArrival = arrivalText
-            )
+            ) }
         }
     }
 
@@ -1099,14 +1154,14 @@ class MainViewModel : ViewModel() {
 
     fun clearTrip() {
         planEtaJob?.cancel()
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             tripPlans = emptyList(),
             tripDestination = null,
             selectedPlan = null,
             planEtas = emptyMap(),
             isTripPlanning = false,
             errorMessage = null
-        )
+        ) }
     }
 
     /** Seçili durağı yolculuk kalkış noktası yapar (Yol Tarifi sekmesine geçilir). */
@@ -1117,31 +1172,31 @@ class MainViewModel : ViewModel() {
         val la = ls?.la ?: stop.latitude?.toDoubleOrNull() ?: return
         val lo = ls?.lo ?: stop.longitude?.toDoubleOrNull() ?: return
         clearStop()
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             tripOrigin = TripPoint(stop.stopName ?: ls?.n ?: "Durak", la, lo),
             tripDestination = null,
             tripPlans = emptyList(),
             selectedPlan = null,
             errorMessage = null,
             navigateToTab = 0
-        )
+        ) }
     }
 
     /** Sekme yönlendirme olayını temizler. */
     fun consumeNavigate() {
-        _uiState.value = _uiState.value.copy(navigateToTab = null)
+        _uiState.update { it.copy(navigateToTab = null) }
     }
 
     // ---------- Hat Seçimi ve Canlı Takip ----------
 
     fun selectRoute(routeCode: String, hatNo: Int?) {
         val resolvedHatNo = hatNo ?: RouteCatalog.findByCode(routeCode)?.hatNo
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             selectedRouteCode = routeCode,
             selectedRouteHatNo = resolvedHatNo,
             selectedStop = null,
             selectedBus = null
-        )
+        ) }
         historyManager?.add(routeCode)
         refreshRecent()
 
@@ -1154,19 +1209,19 @@ class MainViewModel : ViewModel() {
                     dirs.isNotEmpty() -> dirs.first()
                     else -> "G"
                 }
-                _uiState.value = _uiState.value.copy(
+                _uiState.update { it.copy(
                     selectedRouteStops = stops,
                     selectedRouteDirections = dirs,
                     selectedDirection = defaultDir
-                )
+                ) }
             }
             viewModelScope.launch {
                 val coords = repository.getRouteCoordinates(no.toString())
-                _uiState.value = _uiState.value.copy(selectedRouteCoordinates = coords)
+                _uiState.update { it.copy(selectedRouteCoordinates = coords) }
             }
             viewModelScope.launch {
                 val price = repository.getRoutePriceCached(routeCode)
-                _uiState.value = _uiState.value.copy(routePrice = price)
+                _uiState.update { it.copy(routePrice = price) }
             }
         }
         startRealtimeTracking(routeCode)
@@ -1179,7 +1234,7 @@ class MainViewModel : ViewModel() {
     }
 
     fun setDirection(direction: String) {
-        _uiState.value = _uiState.value.copy(selectedDirection = direction)
+        _uiState.update { it.copy(selectedDirection = direction) }
     }
 
     /** Kalkış noktasını konumun en yakın durağına geri alır. */
@@ -1187,9 +1242,9 @@ class MainViewModel : ViewModel() {
         val lat = _uiState.value.userLat
         val lng = _uiState.value.userLng
         if (lat != null && lng != null) {
-            _uiState.value = _uiState.value.copy(
+            _uiState.update { it.copy(
                 tripOrigin = TripPoint("Konumum", lat, lng, isUserLocation = true)
-            )
+            ) }
         }
     }
 
@@ -1197,19 +1252,19 @@ class MainViewModel : ViewModel() {
     fun swapTripPoints() {
         val s = _uiState.value
         if (s.tripOrigin != null && s.tripDestination != null) {
-            _uiState.value = s.copy(
+            _uiState.update { it.copy(
                 tripOrigin = s.tripDestination,
                 tripDestination = s.tripOrigin,
                 tripPlans = emptyList(),
                 selectedPlan = null,
                 errorMessage = null
-            )
+            ) }
         }
     }
 
     fun clearRoute() {
         trackingJob?.cancel()
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { it.copy(
             selectedRouteCode = null,
             selectedRouteHatNo = null,
             selectedRouteStops = emptyList(),
@@ -1220,7 +1275,7 @@ class MainViewModel : ViewModel() {
             isTrackingActive = false,
             selectedStop = null,
             selectedPlan = null
-        )
+        ) }
     }
 
     fun selectBus(bus: BusRealtimeLocation) {
@@ -1228,20 +1283,20 @@ class MainViewModel : ViewModel() {
         val distance = if (state.userLat != null && state.userLng != null && bus.enlem != null && bus.boylam != null) {
             TransitRepository.calculateDistanceMeters(state.userLat, state.userLng, bus.enlem, bus.boylam).toInt()
         } else null
-        _uiState.value = state.copy(selectedBus = bus, selectedBusDistance = distance)
+        _uiState.update { it.copy(selectedBus = bus, selectedBusDistance = distance) }
     }
 
     fun clearBus() {
-        _uiState.value = _uiState.value.copy(selectedBus = null, selectedBusDistance = null)
+        _uiState.update { it.copy(selectedBus = null, selectedBusDistance = null) }
     }
 
     private fun startRealtimeTracking(routeCode: String) {
         trackingJob?.cancel()
         trackingJob = viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isTrackingActive = true)
+            _uiState.update { it.copy(isTrackingActive = true) }
             while (true) {
                 val buses = repository.getRealtimeBuses(routeCode)
-                _uiState.value = _uiState.value.copy(realtimeBuses = buses)
+                _uiState.update { it.copy(realtimeBuses = buses) }
                 delay(8000)
             }
         }
@@ -1341,7 +1396,7 @@ class MainViewModel : ViewModel() {
                         }
                     }
                 }
-                _uiState.value = _uiState.value.copy(planEtas = newMap)
+                _uiState.update { it.copy(planEtas = newMap) }
                 delay(30_000L)
             }
         }

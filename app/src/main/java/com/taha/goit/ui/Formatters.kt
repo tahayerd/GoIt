@@ -2,7 +2,7 @@ package com.taha.goit.ui
 
 /** "00:07:00" biçimini "7 dk" olarak gösterir; 1 saatten uzunları "1s 5dk" yapar. */
 fun formatEtaTime(raw: String?): String {
-    if (raw.isNullOrBlank()) return "-"
+    if (raw.isNullOrBlank() || raw == "-") return "Bekleniyor"
     return try {
         val parts = raw.split(":")
         val h = parts.getOrNull(0)?.toIntOrNull() ?: 0
