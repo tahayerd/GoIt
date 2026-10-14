@@ -13,12 +13,15 @@ A lightweight, personal transit companion for Bursa. No ads, no telemetry, no tr
 
 ### Canlı Yolculuk Modu (Live Directions)
 - Tap **"Yolculuğu Başlat"** on any selected plan to launch full turn-by-turn transit guidance.
+- **Decision logic lives in `JourneyEngine`:** a pure-Kotlin, framework-independent stage machine covered by unit tests (`JourneyEngineTest`) that run on every CI build.
 - **In-App HUD Overlay & Foreground Service (fully automatic transit companion):**
-  - **Yürüyüş (Walk):** Live walking distance and time countdown to board stop.
-  - **Bekleme (Wait):** Live bus arrival ETA polling; boarding is **auto-detected** from GPS speed and distance from stop (no manual confirmation).
-  - **Araçta (Ride):** One-way stop countdown ("N durak kaldı"), expandable stop list (passed, current, upcoming) with remaining duration estimation.
-  - **İniş Uyarısı:** "Get ready" high-priority vibration alarm when approaching the alight stop (<= 250 m or <= 1 stop remaining), with red imminent-alight banner.
-  - **Varış (Arrival):** Celebration alert upon reaching the final destination.
+  - **Yürüyüş (Walk):** Live walking distance and time countdown, plus step-by-step turn hints ("Sola dön • 120 m") derived from the OSRM walking geometry.
+  - **Bekleme (Wait):** Live bus arrival ETA polling with approaching-vehicle details (plate, AC, accessibility). Boarding is **auto-detected** three ways: speed + distance from the stop, a slow-traffic fallback, and progress along the route corridor. A single "Hattın geliyor!" heads-up fires when the ETA drops under a minute.
+  - **Araçta (Ride):** One-way stop countdown projected onto the route polyline (GPS jumps never rewind it), expandable stop list (passed, current, upcoming), and distance-based remaining duration.
+  - **İniş Uyarısı:** "Get ready" high-priority vibration alarm when approaching the alight stop (configurable stops/distance thresholds), with a red imminent-alight banner. Get-off alerts can be toggled straight from the notification.
+  - **Varış (Arrival):** A single celebration alert upon reaching the final destination; tracking stops itself shortly after.
+- **Robustness:** fixes with poor accuracy (>120 m) only refresh the HUD instead of advancing stages, and if the system restarts the service mid-journey it resumes from the persisted payload instead of going silent.
+
 
 ### Duraklar (Stops)
 - Nearby stops sorted by distance with live approaching-bus ETAs, fares, and vehicle amenity indicators (AC, wheelchair access).
