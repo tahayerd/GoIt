@@ -18,7 +18,8 @@ data class JourneyStage(
     val targetLat: Double = 0.0,
     val targetLng: Double = 0.0,
     val targetName: String = "",
-    val stops: List<JourneyStop> = emptyList()   // ride aşamalarında (sayım için)
+    val stops: List<JourneyStop> = emptyList(),  // ride aşamalarında (sayım için)
+    val path: List<JourneyStop> = emptyList()    // walk aşamalarında: adım adım yön tarifi için yol geometrisi
 )
 
 @Serializable

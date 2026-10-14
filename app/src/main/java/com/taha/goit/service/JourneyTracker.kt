@@ -20,7 +20,10 @@ object JourneyTracker {
         val passedStops: List<String> = emptyList(),   // Geçilen durakların listesi
         val currentStopName: String? = null,           // Sıradaki / şu anki durak
         val upcomingStops: List<String> = emptyList(), // Kalan durakların listesi
-        val estimatedMinutesRemaining: Int? = null     // Araçta inişe kalan tahmini dakika
+        val estimatedMinutesRemaining: Int? = null,    // Araçta inişe kalan tahmini dakika
+        val walkHint: String? = null,                  // Yürüyüşte adım adım yönerge ("Sağa dön", "Düz devam")
+        val walkTurnDistanceMeters: Double? = null,    // Sıradaki dönüşe kalan mesafe
+        val distanceToTargetMeters: Double? = null     // Hedef durağa kalan mesafe (bekleme aşaması)
     )
 
     private val _state = MutableStateFlow<RuntimeState?>(null)

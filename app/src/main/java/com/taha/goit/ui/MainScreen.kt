@@ -345,6 +345,7 @@ fun MainScreen(
                     mapInteractionProgress = mapInteractionProgress.value,
                     onStartJourney = onStartJourney,
                     onOpenSettings = { showSettings = true },
+                    onRequestNotificationPermission = onRequestNotificationPermission,
                     modifier = Modifier
                 )
             }
@@ -560,6 +561,7 @@ private fun TripTab(
     mapInteractionProgress: Float = 0f,
     onStartJourney: (Double, Double, String) -> Unit,
     onOpenSettings: () -> Unit,
+    onRequestNotificationPermission: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val journeyActive by com.taha.goit.service.JourneyTracker.state.collectAsState()
@@ -590,6 +592,7 @@ private fun TripTab(
             onToggleCollapse = { isBottomCollapsed = !isBottomCollapsed },
             onSetCollapse = { isBottomCollapsed = it },
             onStartJourney = onStartJourney,
+            onRequestNotificationPermission = onRequestNotificationPermission,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
     }
@@ -1118,6 +1121,7 @@ private fun TripBottomPanel(
     onToggleCollapse: () -> Unit = {},
     onSetCollapse: (Boolean) -> Unit = {},
     onStartJourney: (Double, Double, String) -> Unit,
+    onRequestNotificationPermission: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1199,14 +1203,25 @@ private fun TripBottomPanel(
                             plan = uiState.selectedPlan!!,
                             uiState = uiState,
                             viewModel = viewModel,
+                            onRequestNotificationPermission = onRequestNotificationPermission,
                             onStartJourney = {
+                                // Canlı yolculuk bildirimleri için izin (Android 13+)
+                                if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                                    onRequestNotificationPermission()
+                                }
                                 val json = viewModel.buildJourneyPayloadJson()
-                                if (json != null) {
-                                    if (LocationHelper.hasPermission(context)) {
-                                        JourneyService.startJourney(context, json)
-                                    } else {
-                                        Toast.makeText(context, "Canlı rehberlik için konum izni gerekli", Toast.LENGTH_SHORT).show()
-                                    }
+                                when {
+                                    json == null -> Toast.makeText(
+                                        context,
+                                        "Yolculuk planı hazırlanamadı. Lütfen rotayı yeniden seçin.",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    !LocationHelper.hasPermission(context) -> Toast.makeText(
+                                        context,
+                                        "Canlı rehberlik için konum izni gerekli",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    else -> JourneyService.startJourney(context, json)
                                 }
                             }
                         )
@@ -1360,7 +1375,8 @@ private fun ExpandedPlanDetailView(
     plan: RoutePlan,
     uiState: MainUiState,
     viewModel: MainViewModel,
-    onStartJourney: () -> Unit
+    onStartJourney: () -> Unit,
+    onRequestNotificationPermission: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val settingsManager = remember { (context.applicationContext as GoItApp).settingsManager }

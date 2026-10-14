@@ -22,9 +22,7 @@ import com.taha.goit.data.local.VisitedPlace
 import com.taha.goit.data.local.getBurulasWeekDay
 import com.taha.goit.data.local.normalizeRouteCode
 import com.taha.goit.data.model.*
-import com.taha.goit.service.JourneyPayload
-import com.taha.goit.service.JourneyStage
-import com.taha.goit.service.JourneyStop
+import com.taha.goit.service.JourneyPayloadFactory
 import com.taha.goit.util.MapsLinkParser
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -1077,79 +1075,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun buildJourneyPayloadJson(): String? {
         val plan = _uiState.value.selectedPlan ?: return null
         val dest = _uiState.value.tripDestination ?: return null
-        val stages = mutableListOf<JourneyStage>()
-        // Sadece yürüyüş planı:
-        if (plan.isWalkOnly) {
-            stages += JourneyStage(
-                type = "walk",
-                title = "Hedefe yürü",
-                targetLat = dest.lat,
-                targetLng = dest.lng,
-                targetName = dest.name
+        val walkShapes = _uiState.value.planWalkLegShapes.mapValues { (_, pts) ->
+            pts.map { com.taha.goit.service.GeoPoint(it.latitude, it.longitude) }
+        }
+        return runCatching {
+            val payload = JourneyPayloadFactory.build(
+                plan = plan,
+                destName = dest.name,
+                destLat = dest.lat,
+                destLng = dest.lng,
+                walkShapes = walkShapes
             )
-            return Json.encodeToString(JourneyPayload(dest.name, dest.lat, dest.lng, stages))
-        }
-        val legs = plan.legs
-        legs.forEachIndexed { idx, leg ->
-            when (leg.kind) {
-                "walk" -> {
-                    // hedef = sonraki bus bacağının biniş durağı; yoksa tripDestination
-                    val nextBus = legs.drop(idx + 1).firstOrNull { it.kind == "bus" }
-                    val targetStop = nextBus?.boardStop
-                    val targetLat = targetStop?.latitude?.toDoubleOrNull()
-                    val targetLng = targetStop?.longitude?.toDoubleOrNull()
-                    stages += if (targetStop != null && targetLat != null && targetLng != null) {
-                        JourneyStage(
-                            type = "walk",
-                            title = "${targetStop.stopName ?: "Durağa"} yürü",
-                            targetLat = targetLat,
-                            targetLng = targetLng,
-                            targetName = targetStop.stopName ?: ""
-                        )
-                    } else {
-                        JourneyStage(
-                            type = "walk",
-                            title = "Hedefe yürü",
-                            targetLat = dest.lat,
-                            targetLng = dest.lng,
-                            targetName = dest.name
-                        )
-                    }
-                }
-                "bus" -> {
-                    val b = leg.boardStop
-                    val a = leg.alightStop
-                    if (b != null) {
-                        stages += JourneyStage(
-                            type = "wait",
-                            routeCode = leg.routeCode,
-                            stopId = b.stopId,
-                            title = "${leg.routeCode ?: "Otobüs"} hattını bekle",
-                            targetLat = b.latitude?.toDoubleOrNull() ?: 0.0,
-                            targetLng = b.longitude?.toDoubleOrNull() ?: 0.0,
-                            targetName = b.stopName ?: ""
-                        )
-                    }
-                    if (a != null) {
-                        val busStops = leg.stops.mapNotNull { s ->
-                            val la = s.latitude?.toDoubleOrNull() ?: return@mapNotNull null
-                            val lo = s.longitude?.toDoubleOrNull() ?: return@mapNotNull null
-                            JourneyStop(s.stopName ?: "", la, lo)
-                        }
-                        stages += JourneyStage(
-                            type = "ride",
-                            routeCode = leg.routeCode,
-                            title = "${leg.routeCode ?: "Otobüs"} ile git → ${a.stopName ?: ""}",
-                            targetLat = a.latitude?.toDoubleOrNull() ?: 0.0,
-                            targetLng = a.longitude?.toDoubleOrNull() ?: 0.0,
-                            targetName = a.stopName ?: "",
-                            stops = busStops
-                        )
-                    }
-                }
-            }
-        }
-        return Json.encodeToString(JourneyPayload(dest.name, dest.lat, dest.lng, stages))
+            Json.encodeToString(payload)
+        }.onFailure {
+            android.util.Log.w("MainViewModel", "JourneyPayload üretilemedi", it)
+        }.getOrNull()
     }
 
     fun clearTrip() {

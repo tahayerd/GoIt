@@ -98,6 +98,15 @@ class TransitRepository(
             return max(1, (meters / 1000.0 * factor).roundToInt())
         }
 
+        /** Y-13: Yoğun saate göre dinamik otobüs hız profili (km/h). */
+        fun busSpeedKmh(hourOfDay: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)): Double {
+            return when (hourOfDay) {
+                7, 8, 9, 17, 18, 19 -> 17.0
+                in 0..5, 23 -> 26.0
+                else -> 22.0
+            }
+        }
+
         /** Y-13: Otobüs bacağı süresi (yoğun saate göre dinamik hız modeli) */
         fun busLegMinutes(
             stops: List<RouteStop>,
@@ -113,13 +122,7 @@ class TransitRepository(
                 val lo2 = b.longitude?.toDoubleOrNull() ?: continue
                 meters += calculateDistanceMeters(la1, lo1, la2, lo2)
             }
-            // Dinamik hız profili: Pik saatlerde 17 km/h, gece 26 km/h, normal 22 km/h
-            val speedKmH = when (hourOfDay) {
-                7, 8, 9, 17, 18, 19 -> 17.0
-                in 0..5, 23 -> 26.0
-                else -> 22.0
-            }
-            val drive = meters / 1000.0 / speedKmH * 60.0
+            val drive = meters / 1000.0 / busSpeedKmh(hourOfDay) * 60.0
             val dwell = (stops.size - 1) * 0.33
             return max(3, (drive + dwell).roundToInt())
         }

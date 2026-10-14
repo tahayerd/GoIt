@@ -3,6 +3,7 @@ name: Build APK
 on:
   push:
     branches: [ master, main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 permissions:
@@ -66,5 +67,31 @@ jobs:
           name: goit-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish "latest" prerelease APK
+        if: github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          if ! gh release view latest >/dev/null 2>&1; then
+            gh release create latest \
+              --title "GoIt latest" \
+              --notes "Rolling pre-release built from master (${SHORT_SHA})." \
+              --prerelease
+          fi
+          gh release upload latest "$APK" --clobber
+          gh release edit latest --notes "Rolling pre-release built from master (${SHORT_SHA})."
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          TAG="${GITHUB_REF_NAME}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "GoIt $TAG" --notes "Signed debug APK for $TAG."
+          gh release upload "$TAG" "$APK" --clobber
 
 
