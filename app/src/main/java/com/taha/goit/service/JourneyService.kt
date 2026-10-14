@@ -491,9 +491,13 @@ class JourneyService : Service(), LocationListener {
     private fun prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     private fun persistPayload(rawJson: String?) {
-        prefs().edit().apply {
-            if (rawJson.isNullOrBlank()) remove(KEY_PAYLOAD) else putString(KEY_PAYLOAD, rawJson)
-        }.apply()
+        val editor = prefs().edit()
+        if (rawJson.isNullOrBlank()) {
+            editor.remove(KEY_PAYLOAD)
+        } else {
+            editor.putString(KEY_PAYLOAD, rawJson)
+        }
+        editor.apply()
     }
 
     private fun restorePayload(): JourneyPayload? {
