@@ -571,15 +571,22 @@ class JourneyEngine(
                 ),
                 notification = stage.title.ifEmpty { "${stage.targetName} yürü" }
             )
-            "wait" -> JourneyDecision(
-                state = JourneyTracker.RuntimeState(
-                    stageIndex = stageIndex,
-                    stageType = "wait",
-                    title = stage.title.ifEmpty { "$route hattını bekle" },
-                    detail = "Durak: ${stage.targetName} • $route hattı bekleniyor"
-                ),
-                notification = "$route hattı bekleniyor • Durak: ${stage.targetName}"
-            )
+            "wait" -> {
+                // Henüz konum fix'i yokken de canlı ETA görünsün (kapalı alan / GPS kilidi bekleniyor)
+                val etaText = liveEta?.text
+                val hasEta = !etaText.isNullOrBlank() && etaText != "-"
+                val etaPart = if (hasEta) "$route hattı ~$etaText içinde geliyor" else "$route hattı bekleniyor"
+                JourneyDecision(
+                    state = JourneyTracker.RuntimeState(
+                        stageIndex = stageIndex,
+                        stageType = "wait",
+                        title = stage.title.ifEmpty { "$route hattını bekle" },
+                        detail = "Durak: ${stage.targetName} • $etaPart",
+                        waitEtaMinutes = if (hasEta) etaText else null
+                    ),
+                    notification = "$etaPart • Durak: ${stage.targetName}"
+                )
+            }
             else -> JourneyDecision(
                 state = JourneyTracker.RuntimeState(
                     stageIndex = stageIndex,

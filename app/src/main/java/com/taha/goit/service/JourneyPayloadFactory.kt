@@ -83,7 +83,7 @@ object JourneyPayloadFactory {
             out += JourneyStage(
                 type = "wait",
                 routeCode = leg.routeCode,
-                stopId = board.stopId,
+                stopId = board?.stopId,
                 title = "$route hattını bekle",
                 targetLat = boardLat,
                 targetLng = boardLng,
