@@ -218,6 +218,7 @@ class JourneyEngine(
     // Uyarı durumları
     private var approachWarned = false
     private var alightAlerted = false
+    private var etaImminentWarned = false
 
     private var liveEta: LiveEta? = null
     private var lastFix: JourneyFix? = null
@@ -387,7 +388,15 @@ class JourneyEngine(
                 else -> stageStartDecision(next)
             }
         }
-        return waitStateOnly(stage, fix)
+
+        // Moovit "Your line is arriving!" davranışı: canlı ETA 1 dakikaya indiyse haber ver
+        val etaMinutes = liveEta?.minutes
+        var approach: String? = null
+        if (!etaImminentWarned && etaMinutes != null && etaMinutes <= 1) {
+            etaImminentWarned = true
+            approach = "Hattın geliyor! • ${stage.targetName}"
+        }
+        return waitStateOnly(stage, fix).copy(approachWarning = approach)
     }
 
     private fun waitStateOnly(stage: JourneyStage, fix: JourneyFix): JourneyDecision {
@@ -608,6 +617,7 @@ class JourneyEngine(
         lastStopIdx = -1
         approachWarned = false
         alightAlerted = false
+        etaImminentWarned = false
     }
 
     /** Bekleme aşamasından sonra gelen araç aşamasının durak listesi (koridor kontrolü için). */

@@ -217,6 +217,25 @@ class JourneyEngineTest {
         assertTrue("ETA bilgisi detayda görünmeli", decision.state.detail.contains("7 dk"))
     }
 
+    @Test
+    fun `hat yaklaşınca geliyor uyarısı bir kez verilir`() {
+        val eng = engine(listOf(waitStage, rideStage))
+
+        // Durakta bekleyen kullanıcı, hat 7 dk uzakta
+        eng.onFix(fix(40.1901, 29.0601, speedKmh = 0f, timeMs = 1_000_000L))
+        eng.updateEta(LiveEta(minutes = 7, text = "7 dk"))
+        val far = eng.onFix(fix(40.1901, 29.0601, speedKmh = 0f, timeMs = 1_005_000L))
+        assertNull("7 dk kala geliyor uyarısı verilmemeli", far.approachWarning)
+
+        // Hat 1 dk içinde
+        eng.updateEta(LiveEta(minutes = 1, text = "1 dk"))
+        val near = eng.onFix(fix(40.1901, 29.0601, speedKmh = 0f, timeMs = 1_010_000L))
+        assertNotNull("Hat yaklaşınca uyarı verilmeli", near.approachWarning)
+
+        val again = eng.onFix(fix(40.1901, 29.0601, speedKmh = 0f, timeMs = 1_015_000L))
+        assertNull("Uyarı tekrarlanmamalı", again.approachWarning)
+    }
+
     // ------------------------------------------------------------ Yürüyüş yönergesi
 
     @Test
